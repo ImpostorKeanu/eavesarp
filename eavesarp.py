@@ -144,22 +144,34 @@ def filter(packet,file=stdout):
 
     global transactions
     global senders
+    global sblacklist
     global targets
+    global tblacklist
 
     arp = packet.getlayer('ARP')
     target = arp.pdst
     sender = arp.psrc
-    if senders and sender not in senders:
-        return
-    elif targets and target not in targets:
-        return
 
+    if sblacklist and sender in sblacklist:
+        return None
+    elif tblacklist and target in tblacklist:
+        return None
+
+    if senders and sender not in senders:
+        return None
+    elif targets and target not in targets:
+        return None
+
+    # Handle unknown sender
     if sender not in transactions:
+
         sender = Sender(sender)
         transactions.append(sender)
         sender.targets.append(
             Target(target)
         )
+
+    # Handle known sender
     else:
 
         sender = transactions.get(sender)
@@ -224,6 +236,8 @@ def run_sniffer():
 
 transactions        = HostList()    # Track all transactions
 senders             = []            # Senders filter
+sblacklist          = []
+tblacklist          = []
 targets             = []            # Targets filter
 redraw_frequency    = 5             # Redraw frequency
 
@@ -272,11 +286,21 @@ if __name__ == '__main__':
         is in the argument supplied to this parameter. Input is a
         space delimited series of IP addresses.
         ''')
+    parser.add_argument('--sender-blacklist','-sb',
+        nargs='+',
+        help='''Sender IP addresses that should be ignored.
+        ''')
+    parser.add_argument('--target-blacklist','-tb',
+        nargs='+',
+        help='''Sender IP addresses that should be ignored.
+        ''')
 
     args = parser.parse_args()
 
     if args.sender_addresses: senders = args.sender_addresses
     if args.target_addresses: targets = args.target_addresses
+    if args.sender_blacklist: sblacklist = args.sender_blacklist
+    if args.target_blacklist: tblacklist = args.target_blacklist
     if args.redraw_frequency: redraw_frequency = args.redraw_frequency
 
     run_sniffer()
