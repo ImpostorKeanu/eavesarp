@@ -1,7 +1,32 @@
 #!/usr/bin/env python3
 from scapy.all import sniff,ARP,wrpcap
+from pathlib import Path
 from sys import stderr
 from sys import stdout,stderr
+
+def validate_file_presence(func):
+
+    def wrapper(fname,*args,**kwargs):
+
+        p = Path(fname)
+        if p.exists() and p.is_file():
+            return func(fname,*args,**kwargs)
+        else:
+            raise Exception(
+                f'File not found: {fname}'
+            )
+
+    return wrapper
+
+vfp = validate_file_presence
+
+@vfp
+def import_host_list(fname):
+
+    with open(fname) as infile:
+        output = [l.strip() for l in infile]
+
+    return output
 
 class Host:
 
@@ -47,10 +72,10 @@ class HostList(list):
 
 class Sender(Host):
 
-    def __init__(self,ip,targets=None):
+    def __init__(self,ip,target_whitelist=None):
 
-        if not targets: targets = HostList()
-        self.targets = targets
+        if not target_whitelist: target_whitelist = HostList()
+        self.target_whitelist = target_whitelist
         super().__init__(ip)
 
     def __lt__(self,val):
@@ -60,7 +85,7 @@ class Sender(Host):
                 'Sender can be compared to another Sender object'
             )
 
-        if self.targets.__len__() < val.targets.__len__():
+        if self.target_whitelist.__len__() < val.target_whitelist.__len__():
             return False
         else:
             return True
@@ -90,6 +115,11 @@ def get_output():
 
     global transactions
 
+    if not transactions:
+        output = '- No accepted ARP requests captured\n' \
+        '- If this is unexpected, check your whitelist/blacklist configuration'
+        return output
+
     sen_len = 0
     tar_len = 0
 
@@ -98,7 +128,7 @@ def get_output():
         islen = sender.ip.__len__()
         if sen_len < islen: sen_len = islen
 
-        for target in sender.targets:
+        for target in sender.target_whitelist:
 
             itlen = target.ip.__len__()
             if itlen > tar_len: tar_len = itlen
@@ -120,7 +150,7 @@ def get_output():
     )
     for sender in transactions:
 
-        tar = sender.targets[0]
+        tar = sender.target_whitelist[0]
         output += '{sender_ip: <{sen_len}}{target_ip: <{tar_len}}{target_count: <2}\n'.format(
             sender_ip=sender.ip,
             sen_len=sen_len+spacer,
@@ -129,7 +159,7 @@ def get_output():
             target_count=tar.count,
         )
 
-        for tar in sender.targets[1:]:
+        for tar in sender.target_whitelist[1:]:
             output += '{buff: <{sen_len}}{target_ip: <{tar_len}}{target_count: <2}\n'.format(
                 buff='',
                 target_ip=tar.ip,
@@ -143,23 +173,23 @@ def get_output():
 def filter(packet,file=stdout):
 
     global transactions
-    global senders
-    global sblacklist
-    global targets
-    global tblacklist
+    global sender_whitelist
+    global sender_blacklist
+    global target_whitelist
+    global target_blacklist
 
     arp = packet.getlayer('ARP')
     target = arp.pdst
     sender = arp.psrc
 
-    if sblacklist and sender in sblacklist:
+    if sender_blacklist and sender in sender_blacklist:
         return None
-    elif tblacklist and target in tblacklist:
+    elif target_blacklist and target in target_blacklist:
         return None
 
-    if senders and sender not in senders:
+    if sender_whitelist and sender not in sender_whitelist:
         return None
-    elif targets and target not in targets:
+    elif target_whitelist and target not in target_whitelist:
         return None
 
     # Handle unknown sender
@@ -167,7 +197,7 @@ def filter(packet,file=stdout):
 
         sender = Sender(sender)
         transactions.append(sender)
-        sender.targets.append(
+        sender.target_whitelist.append(
             Target(target)
         )
 
@@ -176,12 +206,12 @@ def filter(packet,file=stdout):
 
         sender = transactions.get(sender)
 
-        if target not in sender.targets:
-            sender.targets.append(
+        if target not in sender.target_whitelist:
+            sender.target_whitelist.append(
                 Target(target)
             )
         else:
-            sender.targets.get(target).count += 1
+            sender.target_whitelist.get(target).count += 1
 
     return None
 
@@ -235,10 +265,10 @@ def run_sniffer():
 
 
 transactions        = HostList()    # Track all transactions
-senders             = []            # Senders filter
-sblacklist          = []
-tblacklist          = []
-targets             = []            # Targets filter
+sender_whitelist             = []            # Senders filter
+sender_blacklist          = []
+target_blacklist          = []
+target_whitelist             = []            # Targets filter
 redraw_frequency    = 5             # Redraw frequency
 
 if __name__ == '__main__':
@@ -273,23 +303,53 @@ if __name__ == '__main__':
         ''')
 
     # Address filters
-    parser.add_argument('--sender-addresses','-ss',
+
+    ## Whitelists
+    parser.add_argument('--sender-whitelist','-sw',
         nargs='+',
         help='''Capture and analyze requests only when the
         sender address is in the argument supplied to this
         parameter. Input is a space delimited series of IP
         addresses.
         ''')
-    parser.add_argument('--target-addresses','-ts',
+
+    parser.add_argument('--sender-whitelist-files','-swfs',
+        nargs='+',
+        help='''Space delimited list of files containing newline
+        delimited IP addresses associated with valid senders.
+        ''')
+
+    parser.add_argument('--target-whitelist','-tw',
         nargs='+',
         help='''Capture requests only when the target IP address
         is in the argument supplied to this parameter. Input is a
         space delimited series of IP addresses.
         ''')
+
+    parser.add_argument('--target-whitelist-files','-twfs',
+        nargs='+',
+        help='''Space delimited list of files containing newline
+        delimited IP addresses associated with valid targets.
+        ''')
+
+    ## Blacklists
     parser.add_argument('--sender-blacklist','-sb',
         nargs='+',
         help='''Sender IP addresses that should be ignored.
         ''')
+
+    parser.add_argument('--sender-blacklist-files','-sbfs',
+        nargs='+',
+        help='''Space delimited list of files containing newline
+        delimited IP addresses associated with invalid senders.
+        ''')
+    
+    parser.add_argument('--target-blacklist-files','-tbfs',
+        nargs='+',
+        help='''Space delimited list of files containing newline
+        delimited IP addresses associated with invalid targets.
+        ''')
+
     parser.add_argument('--target-blacklist','-tb',
         nargs='+',
         help='''Sender IP addresses that should be ignored.
@@ -297,10 +357,25 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    if args.sender_addresses: senders = args.sender_addresses
-    if args.target_addresses: targets = args.target_addresses
-    if args.sender_blacklist: sblacklist = args.sender_blacklist
-    if args.target_blacklist: tblacklist = args.target_blacklist
-    if args.redraw_frequency: redraw_frequency = args.redraw_frequency
+    if args.redraw_frequency:
+        redraw_frequency = args.redraw_frequency
+
+    for k,v in args.__dict__.items():
+
+        if not v: continue
+
+        # Append hosts to lists
+        if k.endswith('list'):
+
+            globals()[k] += v
+
+        # Append hosts to lists from files
+        elif k.endswith('files'):
+
+            lname = k.replace('_files','')
+            local = globals()[lname]
+
+            for fname in v:
+                local += import_host_list(fname)
 
     run_sniffer()
