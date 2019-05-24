@@ -265,10 +265,10 @@ def run_sniffer():
 
 
 transactions        = HostList()    # Track all transactions
-sender_whitelist             = []            # Senders filter
-sender_blacklist          = []
-target_blacklist          = []
-target_whitelist             = []            # Targets filter
+sender_whitelist    = []            # Senders filter
+sender_blacklist    = []           
+target_blacklist    = []
+target_whitelist    = []            # Targets filter
 redraw_frequency    = 5             # Redraw frequency
 
 if __name__ == '__main__':
@@ -279,33 +279,41 @@ if __name__ == '__main__':
         'Analyze ARP requests all eaves-like'
     )
 
+    general_group = parser.add_argument_group(
+        'General Configuration Parameters'
+    )
+
     # Capture configuration
-    parser.add_argument('--interfaces','-i',
+    general_group.add_argument('--interfaces','-i',
         default=['eth0'],
         nargs='+',
         help='''Interfaces to sniff from.
         ''')
 
     # Stdout Configuration
-    parser.add_argument('--redraw-frequency','-rf',
+    general_group.add_argument('--redraw-frequency','-rf',
         default=redraw_frequency,
         type=int,
         help='''Redraw the screen after each N packets
         are sniffed from the interface.
         ''')
 
+    output_group = parser.add_argument_group('Output Configuration Parameters')
+
     # Output files
-    parser.add_argument('--pcap-output-file','-pof',
+    output_group.add_argument('--pcap-output-file','-pof',
         help='''Name of file to dump captured packets
         ''')
-    parser.add_argument('--analysis-output-file','-aof',
+    output_group.add_argument('--analysis-output-file','-aof',
         help='''Name of file to receive analysis output.
         ''')
 
     # Address filters
+    sender_filter_group = parser.add_argument_group(
+        'Sender IP Filter Parameters'
+    )
 
-    ## Whitelists
-    parser.add_argument('--sender-whitelist','-sw',
+    sender_filter_group.add_argument('--sender-whitelist','-sw',
         nargs='+',
         help='''Capture and analyze requests only when the
         sender address is in the argument supplied to this
@@ -313,44 +321,47 @@ if __name__ == '__main__':
         addresses.
         ''')
 
-    parser.add_argument('--sender-whitelist-files','-swfs',
+    sender_filter_group.add_argument('--sender-whitelist-files','-swfs',
         nargs='+',
         help='''Space delimited list of files containing newline
         delimited IP addresses associated with valid senders.
         ''')
 
-    parser.add_argument('--target-whitelist','-tw',
+    sender_filter_group.add_argument('--sender-blacklist','-sb',
+        nargs='+',
+        help='''Sender IP addresses that should be ignored.
+        ''')
+    
+    sender_filter_group.add_argument('--sender-blacklist-files','-sbfs',
+        nargs='+',
+        help='''Space delimited list of files containing newline
+        delimited IP addresses associated with invalid senders.
+        ''')
+    
+    target_filter_group = parser.add_argument_group(
+        'Target IP Filter Parameters'
+    )
+
+    target_filter_group.add_argument('--target-whitelist','-tw',
         nargs='+',
         help='''Capture requests only when the target IP address
         is in the argument supplied to this parameter. Input is a
         space delimited series of IP addresses.
         ''')
 
-    parser.add_argument('--target-whitelist-files','-twfs',
+    target_filter_group.add_argument('--target-whitelist-files','-twfs',
         nargs='+',
         help='''Space delimited list of files containing newline
         delimited IP addresses associated with valid targets.
         ''')
-
-    ## Blacklists
-    parser.add_argument('--sender-blacklist','-sb',
-        nargs='+',
-        help='''Sender IP addresses that should be ignored.
-        ''')
-
-    parser.add_argument('--sender-blacklist-files','-sbfs',
-        nargs='+',
-        help='''Space delimited list of files containing newline
-        delimited IP addresses associated with invalid senders.
-        ''')
     
-    parser.add_argument('--target-blacklist-files','-tbfs',
+    target_filter_group.add_argument('--target-blacklist-files','-tbfs',
         nargs='+',
         help='''Space delimited list of files containing newline
         delimited IP addresses associated with invalid targets.
         ''')
 
-    parser.add_argument('--target-blacklist','-tb',
+    target_filter_group.add_argument('--target-blacklist','-tb',
         nargs='+',
         help='''Sender IP addresses that should be ignored.
         ''')
