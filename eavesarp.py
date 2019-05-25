@@ -6,6 +6,7 @@ from sys import stdout
 from collections import namedtuple
 from tabulate import tabulate
 
+
 Lists = namedtuple('Lists',['white','black'],defaults=([],[],))
 
 # ================
@@ -262,7 +263,7 @@ def get_output(transactions,reverse=True):
 
     return tabulate(
         transactions.to_table(),
-        headers=['Target','Sender','Count']
+        headers=['Sender','Target','Count']
     )
 
 @validate_packet_unpack
