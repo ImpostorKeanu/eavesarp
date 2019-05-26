@@ -599,8 +599,9 @@ if __name__ == '__main__':
 
     import argparse
     main_parser = argparse.ArgumentParser(
-        'Analyze ARP requests all eaves-like'
+        'Analyze ARP requests all eaves-like',
     )
+    main_parser.set_defaults(cmd=None)
 
     subparsers = main_parser.add_subparsers(help='sub-command help',
         metavar='')
@@ -730,6 +731,8 @@ if __name__ == '__main__':
     target_blacklist_files.add(blacklist_filter_group)
 
     args = main_parser.parse_args()
+
+    if not args.cmd: main_parser.print_help() 
 
     # =====================================
     # INITIALIZE WHITELIST/BLACKLIST TUPLES
