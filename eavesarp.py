@@ -13,15 +13,12 @@ from sqlalchemy.orm import relationship, backref, sessionmaker, close_all_sessio
 from sqlalchemy.ext.declarative import declarative_base
 from multiprocessing.pool import Pool
 from dns import reversename, resolver
+import colored
 
 from IPython import embed
 from sys import exit
 
 Lists = namedtuple('Lists',['white','black'],defaults=([],[],))
-
-# ================
-# CAPE CONVENIENCE
-# ================
 
 Base = declarative_base()
 
@@ -176,7 +173,8 @@ def check_lists(ip,lists):
 
     return True
 
-def get_output(db_session,order_by=desc,sender_lists=[],target_lists=[],ptr=False):
+def get_output(db_session,order_by=desc,sender_lists=None,
+        target_lists=None,ptr=False,color=False,resolve=True):
     '''Extract transaction records from the database and return
     them formatted as a table.
     '''
@@ -205,6 +203,12 @@ def get_output(db_session,order_by=desc,sender_lists=[],target_lists=[],ptr=Fals
             sender = t.sender.value
             target = t.target.value
 
+            if sender_lists and not check_lists(sender,sender_lists):
+                continue
+            if target_lists and not check_lists(target,target_lists):
+                continue
+
+
             # Building table rows
             if sender not in rowdict:
                 # Initialize new sender IP with initial row
@@ -217,26 +221,49 @@ def get_output(db_session,order_by=desc,sender_lists=[],target_lists=[],ptr=Fals
             sender = t.sender.value
             target = t.target.value
 
+            if sender_lists and not check_lists(sender,sender_lists):
+                continue
+            if target_lists and not check_lists(sender,target_lists):
+                continue
+
             # Building table rows
             if sender not in rowdict:
                 # Initialize new sender IP with initial row
-                rowdict[sender] = [[sender,target,t.count]]
+                rowdict[sender] = [[sender,target,str(t.count)]]
             else:
                 # Add new row to known sender IP
-                rowdict[sender].append(['',target,t.count])
+                rowdict[sender].append(['',target,str(t.count)])
 
     # Restructure dictionary into a list of rows
     rows = []
+    counter = 0
     for sender,irows in rowdict.items():
-        rows += irows
+        counter += 1
+
+        if color:
+
+            if counter % 2:
+                rows += irows
+            else:
+                rows += [[colored.stylize(v, odd_style) for v in r] for r in irows]
+
+        else:
+            rows += irows
 
     # Build the header
     headers = ['Sender IP','Target IP','WHO-HAS Count']
     if resolve: headers += ['Sender PTR','Target PTR']
 
+    if color: headers = [
+        colored.stylize(v, header_style) for v in headers
+    ]
+
     return tabulate(
             rows,
             headers=headers)
+
+header_style = colored.attr('bold')
+odd_style = colored.fg(244)
 
 def create_db(dbfile,overwrite=False):
     '''Initialize the database file and return a session
@@ -272,7 +299,7 @@ def reverse_resolve(ip):
         return None
 
 @validate_packet_unpack
-def filter_packet(packet,sender_lists,target_lists):
+def filter_packet(packet,sender_lists=None,target_lists=None):
     '''Filter an individual packet. This should be executed in the `lambda`
     supplied to `do_sniff`. `sender_lists` and `target_lists` should be namedtuple
     objects of type `List()`.
@@ -281,30 +308,26 @@ def filter_packet(packet,sender_lists,target_lists):
     if not packet: return False
     sender,target = packet
 
-    if not check_lists(sender,sender_lists) or not check_lists(
-        target,target_lists):
-        return False
+    if sender_lists:
+        if not check_lists(sender,sender_lists):
+            return False
+    if target_lists:
+        if not check_lists(target,target_lists):
+            return False
 
     return packet
 
 def get_or_create_ip(ip,db_session,resolve=False):
 
-    commit_flag = False
-    if not db_session.query(IP).filter(IP.value==ip).count():
+    db_ip = db_session.query(IP).filter(IP.value==ip).first()
+
+    if not db_ip:
 
         ip = IP(value=ip)
         db_session.add(ip)
-        commit_flag = True
-
-
-    else:
-
-        ip = db_session.query(IP).filter(IP.value==ip).first()
-
-    if commit_flag: 
-
         db_session.commit()
 
+        # Obtain and set the PTR record for a given IP
         if resolve:
             ptr = reverse_resolve(ip.value)
 
@@ -315,6 +338,8 @@ def get_or_create_ip(ip,db_session,resolve=False):
                 )
 
             db_session.commit()
+
+    else: ip = db_ip
 
     return ip
 
@@ -360,15 +385,17 @@ def do_sniff(interfaces,redraw_frequency,sender_lists,target_lists):
         count=redraw_frequency
     )
    
-
 def async_sniff(interfaces, redraw_frequency, sender_lists,
-        target_lists, dbfile, resolve, verbose=False):
+        target_lists, dbfile, analysis_output_file=None, resolve=False, 
+        color=False, verbose=False):
     '''This function should be started in a distinct process, allowing
     the one to CTRL^C during execution and gracefully exit the sniffer.
     Not starting the sniffer in a distinct process results in it blocking
     forever or until an inordinate number of keyboard interrupts occur.
     '''
 
+    # Handle new database file. When verbose, alert user that a new
+    # capture must occur prior to printing results.
     if not Path(dbfile).exists():
 
         if verbose: print(
@@ -377,26 +404,50 @@ def async_sniff(interfaces, redraw_frequency, sender_lists,
         )
         sess = create_db(dbfile)
 
+    # Dump the existing database to stdout prior to sniffing.
     else:
         
         sess = create_db(dbfile)
         stdout.write('\x1b[2J\x1b[H')
-        stdout.write(get_output(sess))
+        stdout.write(
+            get_output(
+                sess,
+                sender_lists=sender_lists,
+                target_lists=target_lists,
+                color=color
+            )
+        )
 
+    # Capture packets
     packets = do_sniff(interfaces,
             redraw_frequency, sender_lists,
             target_lists)
 
+    # Handle packets (to the db they go, yo)
     handle_packets(packets,sess,resolve)
 
-    return get_output(sess,resolve),packets
+    return get_output(
+            sess,sender_lists=sender_lists,
+            target_lists=target_lists,color=color),packets
 
-def analyze(database_output_file,analysis_output_file=None,
-        pcap_files=[], sqlite_files=[], *args, **kwargs):
+def analyze(database_output_file, sender_lists=None, target_lists=None,
+        analysis_output_file=None, pcap_files=[], sqlite_files=[],
+        color=False, *args, **kwargs):
+    '''Create a new database and populate it with records stored in
+    each type of input file.
+    '''
 
     outdb_sess = create_db(database_output_file,overwrite=True)
 
-    # Handle sqlite files first
+    # ===================
+    # HANDLE SQLITE FILES
+    # ===================
+
+    '''
+    Import the source database to the new database by reading in
+    each transaction. Note that new id values are assigned to
+    each IP in the process.
+    '''
     for sfile in sqlite_files:
         
         isess = create_db(sfile)
@@ -431,16 +482,116 @@ def analyze(database_output_file,analysis_output_file=None,
 
             outdb_sess.commit()
 
+    # =====================
+    # HANDLE EACH PCAP FILE
+    # =====================
+
+    '''
+    This is much easier than SQLITE files since we can just use
+    Scapy to slurp the packets from each target file, filter each
+    packet, and then use `handle_packets` to populate the database.
+    '''
+
     for pfile in pcap_files:
 
+        # Assure that each packet is ARP WHO-HAS
+        packets = [p for p in rdpcap(pfile) if filter_packet(p)]
+
+        # Insert the records
         handle_packets(
-            rdpcap(pfile),
+            packets,
             outdb_sess
         )
 
-    return get_output(outdb_sess)
+    return get_output(
+            outdb_sess,
+            sender_lists=sender_lists,
+            target_lists=target_lists,
+            color=color)
 
 if __name__ == '__main__':
+    
+    # ====================================
+    # BUSH LEAGUE: Make arguments reusable
+    # ====================================
+
+    class Argument:
+        '''Basic object that will be used to add arguments
+        to argparse objects automagically.
+        '''
+
+        def __init__(self, *args, **kwargs):
+
+            self.args = args
+            self.kwargs = kwargs
+
+        def add(self, target):
+            '''Add the argument to the target argparse object.
+            '''
+
+            target.add_argument(*self.args, **self.kwargs)
+
+    sender_whitelist = Argument('--sender-whitelist','-sw',
+        nargs='+',
+        help='''Capture and analyze requests only when the
+        sender address is in the argument supplied to this
+        parameter. Input is a space delimited series of IP
+        addresses.
+        ''')
+
+    sender_whitelist_files = Argument('--sender-whitelist-files','-swfs',
+        nargs='+',
+        help='''Space delimited list of files containing newline
+        delimited IP addresses associated with valid senders.
+        ''')
+
+    target_whitelist = Argument('--target-whitelist','-tw',
+        nargs='+',
+        help='''Capture requests only when the target IP address
+        is in the argument supplied to this parameter. Input is a
+        space delimited series of IP addresses.
+        ''')
+    
+    target_whitelist_files = Argument('--target-whitelist-files','-twfs',
+        nargs='+',
+        help='''Space delimited list of files containing newline
+        delimited IP addresses associated with valid targets.
+        ''')
+
+    sender_blacklist = Argument('--sender-blacklist','-sb',
+        nargs='+',
+        help='''Sender IP addresses that should be ignored.
+        ''')
+    
+    sender_blacklist_files = Argument('--sender-blacklist-files','-sbfs',
+        nargs='+',
+        help='''Space delimited list of files containing newline
+        delimited IP addresses associated with invalid senders.
+        ''')
+    
+    target_blacklist = Argument('--target-blacklist','-tb',
+        nargs='+',
+        help='''Sender IP addresses that should be ignored.
+        ''')
+        
+    target_blacklist_files = Argument('--target-blacklist-files','-tbfs',
+        nargs='+',
+        help='''Space delimited list of files containing newline
+        delimited IP addresses associated with invalid targets.
+        ''')
+
+    database_output_file = Argument('--database-output-file','-dof',
+        default='eavesarp.db',
+        help='''Name of the SQLite database file to output.
+        Default: %(default)s
+        '''
+    )
+    
+    analysis_output_file = Argument('--analysis-output-file','-aof',
+        default='',
+        help='''Name of file to receive analysis output.
+        '''
+    )
 
     # =============
     # BUILD THE CLI
@@ -476,19 +627,31 @@ if __name__ == '__main__':
         help='''SQLite files previously created by eavesarp. Useful
         when aggregating multiple databases.
         ''')
+
     aog = analyze_output_group = analyze_parser.add_argument_group(
         'Output Parameters'
     )
-    aog.add_argument('--database-output-file','-dof',
-        default='eavesarp_dump.db',
-        help='''Name of the SQLite database file to output.
-        Default: %(default)s
-        '''
+
+    database_output_file.add(aog)
+    analysis_output_file.add(aog)
+
+    awfg = aw_filter_group = analyze_parser.add_argument_group(
+        'Whitelist IP Filter Parameters'
     )
-    aog.add_argument('--analysis-output-file','-aof',
-        help='''Name of file to receive analysis output.
-        '''
+    
+    sender_whitelist.add(awfg)
+    sender_whitelist_files.add(awfg)
+    target_whitelist.add(awfg)
+    target_whitelist_files.add(awfg)
+    
+    abfg = ab_filter_group = analyze_parser.add_argument_group(
+        'Black IP Filter Parameters'
     )
+
+    sender_blacklist.add(abfg)
+    sender_blacklist_files.add(abfg)
+    target_blacklist.add(abfg)
+    target_blacklist_files.add(abfg)
 
     # ============================
     # CAPTURE SUBCOMMAND ARGUMENTS
@@ -497,13 +660,16 @@ if __name__ == '__main__':
     capture_parser = subparsers.add_parser('capture',
         aliases=['c'],
         help='Capture and analyze ARP requests')
+
+    # Set default cmd value
     capture_parser.set_defaults(cmd='capture')
 
+    # General configuration Options
     general_group = capture_parser.add_argument_group(
         'General Configuration Parameters'
     )
 
-    # Capture configuration
+    # Capture interfaces
     general_group.add_argument('--interfaces','-i',
         default=['eth0'],
         nargs='+',
@@ -518,89 +684,125 @@ if __name__ == '__main__':
         are sniffed from the interface.
         ''')
 
+    # Make color optional
+    general_group.add_argument('--disable-color','-dc',
+        action='store_true',
+        help='''Disable colored printing''')
+
     # Reverse DNS Configuration
     general_group.add_argument('--disable-reverse-dns','-drdns',
         action='store_true',
         help='''Disable reverse resolution of IP addresses.
         ''')
 
-    output_group = capture_parser.add_argument_group('Output Configuration Parameters')
-
     # Output files
+    output_group = capture_parser.add_argument_group(
+        'Output Configuration Parameters'
+    )
+    database_output_file.add(output_group)
+
+    # Analysis output file
+    analysis_output_file.add(output_group)
+
+    # PCAP output file
     output_group.add_argument('--pcap-output-file','-pof',
         help='''Name of file to dump captured packets
         ''')
-    output_group.add_argument('--analysis-output-file','-aof',
-        help='''Name of file to receive analysis output.
-        ''')
-    output_group.add_argument('--database-output-file','-dof',
-        default='eavesarp.db',
-        help='''Name of SQLite database file to output.
-        Default: %(default)s
-        '''
-    )
 
-    # Address filters
-
+    # Address whitelist filters
     whitelist_filter_group = capture_parser.add_argument_group(
         'Whitelist IP Filter Parameters'
     )
     
-    whitelist_filter_group.add_argument('--sender-whitelist','-sw',
-        nargs='+',
-        help='''Capture and analyze requests only when the
-        sender address is in the argument supplied to this
-        parameter. Input is a space delimited series of IP
-        addresses.
-        ''')
-
-    whitelist_filter_group.add_argument('--sender-whitelist-files','-swfs',
-        nargs='+',
-        help='''Space delimited list of files containing newline
-        delimited IP addresses associated with valid senders.
-        ''')
-
-    whitelist_filter_group.add_argument('--target-whitelist','-tw',
-        nargs='+',
-        help='''Capture requests only when the target IP address
-        is in the argument supplied to this parameter. Input is a
-        space delimited series of IP addresses.
-        ''')
+    sender_whitelist.add(whitelist_filter_group)
+    sender_whitelist_files.add(whitelist_filter_group)
+    target_whitelist.add(whitelist_filter_group)
+    target_whitelist_files.add(whitelist_filter_group)
     
-    whitelist_filter_group.add_argument('--target-whitelist-files','-twfs',
-        nargs='+',
-        help='''Space delimited list of files containing newline
-        delimited IP addresses associated with valid targets.
-        ''')
-
+    # Address blacklist filters
     blacklist_filter_group = capture_parser.add_argument_group(
         'Whitelist IP Filter Parameters'
     )
 
-    blacklist_filter_group.add_argument('--sender-blacklist','-sb',
-        nargs='+',
-        help='''Sender IP addresses that should be ignored.
-        ''')
-    
-    blacklist_filter_group.add_argument('--sender-blacklist-files','-sbfs',
-        nargs='+',
-        help='''Space delimited list of files containing newline
-        delimited IP addresses associated with invalid senders.
-        ''')
-    
-    blacklist_filter_group.add_argument('--target-blacklist','-tb',
-        nargs='+',
-        help='''Sender IP addresses that should be ignored.
-        ''')
-        
-    blacklist_filter_group.add_argument('--target-blacklist-files','-tbfs',
-        nargs='+',
-        help='''Space delimited list of files containing newline
-        delimited IP addresses associated with invalid targets.
-        ''')
+    sender_blacklist.add(blacklist_filter_group)
+    sender_blacklist_files.add(blacklist_filter_group)
+    target_blacklist.add(blacklist_filter_group)
+    target_blacklist_files.add(blacklist_filter_group)
 
     args = main_parser.parse_args()
 
+    # =====================================
+    # INITIALIZE WHITELIST/BLACKLIST TUPLES
+    # =====================================
+
+    # Initialize white/black list objects for sender and target
+    # addresses
+    sender_lists = Lists()
+    target_lists = Lists()
+
+    # Compile a regexp for variable names,
+    # Used to dynamically pull and populate local variables.
+    reg_list = re.compile(
+        '^(?P<host_type>sender|target)_' \
+        '(?P<list_type>(whitelist|blacklist))' \
+        '(?P<files>_files)?'
+    )
+
+    # Load the whitelists/blacklists
+    for arg_handle, arg_val in args.__dict__.items():
+
+        # ======================================
+        # DYNAMICALLY POPULATE WHITE/BLACK LISTS
+        # ======================================
+
+        '''
+        The following logic accesses sender_lists and target_lists
+        using the `locals()` builtin by detecting the appropriate
+        variable by applying a regular expression to the name of
+        each argument.
+        '''
+
+        # Apply the regex
+        match = re.match(reg_list,arg_handle)
+
+        # Irrelevant argument if no match is provided
+        if not arg_val or not match:
+            continue
+
+        '''
+        Extract the group dictionary, host_type, and list_type from
+        the groups while removing list from the argument name. This
+        translates the value of k to match up with a local variable
+        of the same name.
+        '''
+
+        gd = match.groupdict() 
+        host_type = gd['host_type'] # sender or target
+        list_type = gd['list_type'].replace('list','') # white or black
+        
+        # Get the appropriate lists object based on name, as crafted
+        # from the argument handle, i.e. `sender_lists` or `target_lists`
+        lst = locals()[host_type+'_lists'].__getattribute__(list_type)
+
+        # Files flag is used to determine if records should be slurped
+        # from a series of files
+        if gd['files']: files = True
+        else: files = False
+
+        if files:
+            # Import lines from files
+            for fname in arg_val: lst += import_host_list(fname)
+        else:
+            # Append lines from value
+            lst += arg_val
+
+        lst = set(lst)
+
+    # ============================
+    # BEGIN EXECUTING THE COMMANDS
+    # ============================
+
+    # Analyze and exit
     if args.cmd == 'analyze':
 
         if not args.pcap_files and not args.sqlite_files:
@@ -610,76 +812,16 @@ if __name__ == '__main__':
 
         print(analyze(**args.__dict__))
 
+    # Capture and exit
     elif args.cmd == 'capture':
 
-        if args.disable_reverse_dns:
-            resolve = False
-        else:
-            resolve = True
+        # Configure reverse name resolution
+        if args.disable_reverse_dns: resolve = False
+        else: resolve = True
 
-        # Initialize white/black list objects for sender and target
-        # addresses
-        sender_lists = Lists()
-        target_lists = Lists()
-    
-        # Compile a regexp for variable names,
-        # Used to dynamically pull and populate local variables.
-        reg_list = re.compile(
-            '^(?P<host_type>sender|target)_' \
-            '(?P<list_type>(whitelist|blacklist))' \
-            '(?P<files>_files)?'
-        )
-    
-        # Load the whitelists/blacklists
-        for arg_handle, arg_val in args.__dict__.items():
-    
-            # ======================================
-            # DYNAMICALLY POPULATE WHITE/BLACK LISTS
-            # ======================================
-    
-            '''
-            The following logic accesses sender_lists and target_lists
-            using the `locals()` builtin by detecting the appropriate
-            variable by applying a regular expression to the name of
-            each argument.
-            '''
-    
-            # Apply the regex
-            match = re.match(reg_list,arg_handle)
-    
-            # Irrelevant argument if no match is provided
-            if not arg_val or not match:
-                continue
-    
-            '''
-            Extract the group dictionary, host_type, and list_type from
-            the groups while removing list from the argument name. This
-            translates the value of k to match up with a local variable
-            of the same name.
-            '''
-    
-            gd = match.groupdict() 
-            host_type = gd['host_type'] # sender or target
-            list_type = gd['list_type'].replace('list','') # white or black
-            
-            # Get the appropriate lists object based on name, as crafted
-            # from the argument handle, i.e. `sender_lists` or `target_lists`
-            lst = locals()[host_type+'_lists'].__getattribute__(list_type)
-    
-            # Files flag is used to determine if records should be slurped
-            # from a series of files
-            if gd['files']: files = True
-            else: files = False
-    
-            if files:
-                # Import lines from files
-                for fname in arg_val: lst += import_host_list(fname)
-            else:
-                # Append lines from value
-                lst += arg_val
-    
-            lst = set(lst)
-    
+        # Configure color printing
+        if args.disable_color: color = False
+        else: color = True
     
         try:
     
@@ -692,10 +834,17 @@ if __name__ == '__main__':
             will block forever when scapy.all.sniff is called. This allows
             us to interrupt execution of the sniffer by terminating the
             process.
+
+            TODO: It may be easier to use threading. Pool methods were fresh
+            to me at the time of original development.
             '''
     
             pool = Pool(1)
+
+            # Cache packets that will be written to output file
             pkts = []
+
+            # Loop eternally
             while True:
     
                 result = pool.apply_async(
@@ -706,25 +855,27 @@ if __name__ == '__main__':
                         sender_lists,
                         target_lists,
                         args.database_output_file,
+                        args.analysis_output_file,
                         resolve,
+                        color,
                         True
                     )
                 )
     
-                while not result.ready():
-                    sleep(.2)
+                # Eternal loop while waiting for the result
+                while not result.ready(): sleep(.2)
     
+                # Clear the screen and print the results
                 stdout.write('\x1b[2J\x1b[H')
                 output,packets = result.get()
 
-                if args.pcap_output_file:
-                    pkts += packets
-
+                # Capture packets for the output file
+                if args.pcap_output_file: pkts += packets
                 print(output)
     
         except KeyboardInterrupt:
     
-            print('- CTRL^C Caught...')
+            print('\n- CTRL^C Caught...')
             print('- Killing sniffer process and exiting')
     
         finally:
@@ -732,17 +883,22 @@ if __name__ == '__main__':
             # ===================
             # HANDLE OUTPUT FILES
             # ===================
-            
+    
+            if args.pcap_output_file: wrpcap(args.pcap_output_file,pkts)
             if args.analysis_output_file:
-    
-                print('- Writing analysis file')
+
+                sess = create_db(args.database_output_file)
+
                 with open(args.analysis_output_file,'w') as outfile:
-                    outfile.write(get_output()+'\n')
-    
-            if args.pcap_output_file:
-    
-                print('- Writing pcap file')
-                wrpcap(args.pcap_output_file,pkts)
+
+                    outfile.write(
+                        get_output(
+                            sess,
+                            sender_lists=sender_lists,
+                            target_lists=target_lists,
+                            color=False
+                        )+'\n'
+                    )
     
             # =========================
             # CLOSE THE SNIFFER PROCESS
@@ -751,15 +907,12 @@ if __name__ == '__main__':
             try:
     
                 pool.close()
-                print('- Waiting for the process to finish...')
                 result.wait(5)
     
             except KeyboardInterrupt:
     
-                print('- Terminating sniffer process!')
                 pool.terminate()
     
-            print('- Joining the process')
             pool.join()
     
-            print('- Exiting')
+            print('- Done! Exiting')
