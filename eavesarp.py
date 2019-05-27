@@ -1,26 +1,37 @@
 #!/usr/bin/env python3
+
 import re
+import colored
 from scapy.all import sniff,ARP,wrpcap,rdpcap
 from pathlib import Path
 from time import sleep
 from os import remove
-from sys import stdout
 from tabulate import tabulate
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, func, text, ForeignKeyConstraint, UniqueConstraint
-from sqlalchemy import create_engine, asc, desc
-from sqlalchemy.orm import relationship, backref, sessionmaker, close_all_sessions
+from sqlalchemy import (Column, Integer, String, DateTime, ForeignKey,
+        func, text, ForeignKeyConstraint, UniqueConstraint,
+        create_engine, asc, desc)
+from sqlalchemy.orm import (relationship, backref, sessionmaker,
+        close_all_sessions)
 from sqlalchemy.ext.declarative import declarative_base
 from multiprocessing.pool import Pool
 from dns import reversename, resolver
-import colored
 
-from IPython import embed
-from sys import exit
+# =========
+# CONSTANTS
+# =========
 
-ipv4_re = i4_re = re.compile('^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$')
+# Styles for color printing
+header_style = colored.attr('bold')
+odd_style = colored.fg(244)
+
+# Regexp to validate ipv4 structure
+ipv4_re = re.compile('^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$')
+
+# =========================
+# SQLALCHEMY INITIALIZATION
+# =========================
 
 Base = declarative_base()
-
 class IP(Base):
     '''IP model.
     '''
@@ -77,7 +88,6 @@ class Transaction(Base):
         [IP.id,IP.id],
     )
 
-
 # ==========
 # DECORATORS
 # ==========
@@ -133,6 +143,29 @@ def unpack_packets(func):
 # FUNCTIONS
 # =========
 
+@validate_file_presence
+def ipv4_from_file(infile):
+
+    addrs = []
+    with open(infile) as lines:
+
+        for line in lines:
+
+            line = line.strip()
+            if validate_ipv4(line): addrs.append(line)
+            else: continue
+    
+    return addrs
+
+def validate_ipv4(val):
+    '''Verify if a given value matches the pattern of an
+    IPv4 address.
+    '''
+
+    m = re.match(ipv4_re,val)
+    if m: return m
+    else: return False
+
 def validate_packet(packet,unpack=True):
     '''Validate a packet to be of type ARP. Leave unpack to True and
     the returned object will be ARP instead of Boolean.
@@ -152,7 +185,6 @@ def unpack_arp(arp):
     '''
 
     return arp.psrc,arp.pdst
-#    return  arp.pdst,arp.psrc
 
 def unpack_packet(packet):
     '''Extract and return the ARP layer from a packet object.
@@ -161,6 +193,9 @@ def unpack_packet(packet):
     return unpack_arp(packet.getlayer('ARP'))
 
 def check_lists(ip,lists):
+    '''Check an IP against a Lists object to determine if it
+    should be included in output.
+    '''
 
     if lists.black and ip in lists.black:
         return False
@@ -188,6 +223,7 @@ def get_output(db_session,order_by=desc,sender_lists=None,
     rowdict = {}
     for t in transactions:
 
+        # Add a new pair of columns when reverse dns resolution is enabled
         if resolve:
 
             sptr = ''
@@ -212,6 +248,7 @@ def get_output(db_session,order_by=desc,sender_lists=None,
                 # Add new row to known sender IP
                 rowdict[sender].append(['',target,t.count,'',tptr])
 
+        # Simplified output when reverse dns is disabled
         else:
             
             sender = t.sender.value
@@ -236,6 +273,7 @@ def get_output(db_session,order_by=desc,sender_lists=None,
     for sender,irows in rowdict.items():
         counter += 1
 
+        # Color odd rows slightly darker
         if color:
 
             if counter % 2:
@@ -243,23 +281,23 @@ def get_output(db_session,order_by=desc,sender_lists=None,
             else:
                 rows += [[colored.stylize(v, odd_style) for v in r] for r in irows]
 
-        else:
-            rows += irows
+        # Just add the rows otherwise
+        else: rows += irows
 
     # Build the header
     headers = ['Sender IP','Target IP','WHO-HAS Count']
     if resolve: headers += ['Sender PTR','Target PTR']
 
+    # Apply color if enabled
     if color: headers = [
         colored.stylize(v, header_style) for v in headers
     ]
 
+    # Return the output as a table
     return tabulate(
             rows,
             headers=headers)
 
-header_style = colored.attr('bold')
-odd_style = colored.fg(244)
 
 def create_db(dbfile,overwrite=False):
     '''Initialize the database file and return a session
@@ -313,7 +351,9 @@ def filter_packet(packet,sender_lists=None,target_lists=None):
 
     return packet
 
-def get_or_create_ip(ip,db_session,resolve=False):
+def get_or_create_ip(ip,db_session,resolve=False,ptr=None):
+    '''Get or create an IP object from the SQLite database.
+    '''
 
     db_ip = db_session.query(IP).filter(IP.value==ip).first()
 
@@ -324,7 +364,16 @@ def get_or_create_ip(ip,db_session,resolve=False):
         db_session.commit()
 
         # Obtain and set the PTR record for a given IP
-        if resolve:
+        if ptr:
+
+            db_session.add(
+                PTR(ip_id=ip.id,value=ptr)
+            )
+
+            db_session.commit()
+
+        elif resolve:
+
             ptr = reverse_resolve(ip.value)
 
             if ptr:
@@ -404,8 +453,8 @@ def async_sniff(interfaces, redraw_frequency, sender_lists,
     else:
         
         sess = create_db(dbfile)
-        stdout.write('\x1b[2J\x1b[H')
-        stdout.write(
+        print('\x1b[2J\x1b[H')
+        print(
             get_output(
                 sess,
                 sender_lists=sender_lists,
@@ -422,13 +471,16 @@ def async_sniff(interfaces, redraw_frequency, sender_lists,
     # Handle packets (to the db they go, yo)
     handle_packets(packets,sess,resolve)
 
+    # output,packets
     return get_output(
-            sess,sender_lists=sender_lists,
-            target_lists=target_lists,color=color),packets
+            sess,
+            sender_lists=sender_lists,
+            target_lists=target_lists,
+            color=color),packets
 
 def analyze(database_output_file, sender_lists=None, target_lists=None,
         analysis_output_file=None, pcap_files=[], sqlite_files=[],
-        color=False, *args, **kwargs):
+        color=False, resolve=True, *args, **kwargs):
     '''Create a new database and populate it with records stored in
     each type of input file.
     '''
@@ -448,10 +500,32 @@ def analyze(database_output_file, sender_lists=None, target_lists=None,
         
         isess = create_db(sfile)
 
+        # ====================================================
+        # ITERATE OVER EACH TRANSACTION AND TRANSFER TO NEW DB
+        # ====================================================
+
         for t in isess.query(Transaction).all():
 
-            sender = get_or_create_ip(t.sender.value,outdb_sess)
-            target = get_or_create_ip(t.target.value,outdb_sess)
+            # ===============
+            # HANDLE POINTERS
+            # ===============
+
+            if t.sender.ptr: sptr = t.sender.ptr[0].value
+            else: sptr=None
+
+            if t.target.ptr: tptr = t.target.ptr[0].value
+            else: tptr=None
+
+            # =================
+            # HANDLE IP OBJECTS
+            # =================
+
+            sender = get_or_create_ip(t.sender.value,outdb_sess,ptr=sptr)
+            target = get_or_create_ip(t.target.value,outdb_sess,ptr=tptr)
+
+            # ======================
+            # HANDLE THE TRANSACTION
+            # ======================
 
             transaction = outdb_sess.query(Transaction).filter(
                 Transaction.sender_ip_id==sender.id,
@@ -503,7 +577,8 @@ def analyze(database_output_file, sender_lists=None, target_lists=None,
             outdb_sess,
             sender_lists=sender_lists,
             target_lists=target_lists,
-            color=color)
+            color=color,
+            resolve=resolve)
 
 class Lists:
 
@@ -546,12 +621,6 @@ if __name__ == '__main__':
         addresses.
         ''')
 
-    sender_whitelist_files = Argument('--sender-whitelist-files','-swfs',
-        nargs='+',
-        help='''Space delimited list of files containing newline
-        delimited IP addresses associated with valid senders.
-        ''')
-
     target_whitelist = Argument('--target-whitelist','-tw',
         nargs='+',
         help='''Capture requests only when the target IP address
@@ -559,32 +628,14 @@ if __name__ == '__main__':
         space delimited series of IP addresses.
         ''')
     
-    target_whitelist_files = Argument('--target-whitelist-files','-twfs',
-        nargs='+',
-        help='''Space delimited list of files containing newline
-        delimited IP addresses associated with valid targets.
-        ''')
-
     sender_blacklist = Argument('--sender-blacklist','-sb',
         nargs='+',
         help='''Sender IP addresses that should be ignored.
         ''')
     
-    sender_blacklist_files = Argument('--sender-blacklist-files','-sbfs',
-        nargs='+',
-        help='''Space delimited list of files containing newline
-        delimited IP addresses associated with invalid senders.
-        ''')
-    
     target_blacklist = Argument('--target-blacklist','-tb',
         nargs='+',
         help='''Sender IP addresses that should be ignored.
-        ''')
-        
-    target_blacklist_files = Argument('--target-blacklist-files','-tbfs',
-        nargs='+',
-        help='''Space delimited list of files containing newline
-        delimited IP addresses associated with invalid targets.
         ''')
 
     database_output_file = Argument('--database-output-file','-dof',
@@ -599,6 +650,17 @@ if __name__ == '__main__':
         help='''Name of file to receive analysis output.
         '''
     )
+    
+    # Reverse DNS Configuration
+    disable_reverse_resolve = Argument('--disable-reverse-dns','-drdns',
+        action='store_true',
+        help='''Disable reverse resolution of IP addresses.
+        ''')
+    
+    # Make color optional
+    disable_color = Argument('--disable-color','-dc',
+        action='store_true',
+        help='''Disable colored printing''')
 
     # =============
     # BUILD THE CLI
@@ -622,6 +684,14 @@ if __name__ == '__main__':
         help='Analyze an sqlite database or pcap file')
     analyze_parser.set_defaults(cmd='analyze')
 
+    general_group = analyze_parser.add_argument_group(
+        'General Configuration Parameters'
+    )
+
+    disable_reverse_resolve.add(general_group)
+    disable_color.add(general_group)
+
+    # INPUT FILES
     input_group = analyze_parser.add_argument_group(
         'Input Parameters'
     )
@@ -636,30 +706,28 @@ if __name__ == '__main__':
         when aggregating multiple databases.
         ''')
 
+    # OUTPUT FILES
     aog = analyze_output_group = analyze_parser.add_argument_group(
         'Output Parameters'
     )
 
-    database_output_file.add(aog)
-    analysis_output_file.add(aog)
+    aog.add_argument('--database-output-file','-dbo',
+        default='eavesarp_dump.db',
+        help='File to receive aggregated output')
 
     awfg = aw_filter_group = analyze_parser.add_argument_group(
         'Whitelist IP Filter Parameters'
     )
     
     sender_whitelist.add(awfg)
-    sender_whitelist_files.add(awfg)
     target_whitelist.add(awfg)
-    target_whitelist_files.add(awfg)
     
     abfg = ab_filter_group = analyze_parser.add_argument_group(
-        'Black IP Filter Parameters'
+        'Blacklist IP Filter Parameters'
     )
 
     sender_blacklist.add(abfg)
-    sender_blacklist_files.add(abfg)
     target_blacklist.add(abfg)
-    target_blacklist_files.add(abfg)
 
     # ============================
     # CAPTURE SUBCOMMAND ARGUMENTS
@@ -692,18 +760,10 @@ if __name__ == '__main__':
         are sniffed from the interface.
         ''')
 
-    # Make color optional
-    general_group.add_argument('--disable-color','-dc',
-        action='store_true',
-        help='''Disable colored printing''')
+    disable_color.add(general_group)
+    disable_reverse_resolve.add(general_group)
 
-    # Reverse DNS Configuration
-    general_group.add_argument('--disable-reverse-dns','-drdns',
-        action='store_true',
-        help='''Disable reverse resolution of IP addresses.
-        ''')
-
-    # Output files
+    # OUTPUT FILES
     output_group = capture_parser.add_argument_group(
         'Output Configuration Parameters'
     )
@@ -723,9 +783,7 @@ if __name__ == '__main__':
     )
     
     sender_whitelist.add(whitelist_filter_group)
-    sender_whitelist_files.add(whitelist_filter_group)
     target_whitelist.add(whitelist_filter_group)
-    target_whitelist_files.add(whitelist_filter_group)
     
     # Address blacklist filters
     blacklist_filter_group = capture_parser.add_argument_group(
@@ -733,9 +791,7 @@ if __name__ == '__main__':
     )
 
     sender_blacklist.add(blacklist_filter_group)
-    sender_blacklist_files.add(blacklist_filter_group)
     target_blacklist.add(blacklist_filter_group)
-    target_blacklist_files.add(blacklist_filter_group)
 
     args = main_parser.parse_args()
 
@@ -796,40 +852,85 @@ if __name__ == '__main__':
         # from the argument handle, i.e. `sender_lists` or `target_lists`
         lst = locals()[var_name].__getattribute__(list_type)
 
-        # Files flag is used to determine if records should be slurped
-        # from a series of files
-        if gd['files']: 
-            # Import lines from files
-            for fname in arg_val: lst += import_host_list(fname)
-        else: 
-            lst += arg_val
+        for line in arg_val:
 
-        lst = set(lst)
-    
+            match = validate_ipv4(line)
+
+            if not match:
+                if not Path(line).exists():
+                    print(
+                        f'Invalid ipv4 address and unknown file, skipping: {line}'
+                    )
+                else:
+                    lst += ipv4_from_file(line)
+            else:
+                lst.append(line)
+
+        lst = list(set(lst))
+
+    # ============================================
+    # PREVENT DUPLICATE VALUES BETWEEN WHITE/BLACK
+    # ============================================
+
+    for handle in ['sender_lists','target_lists']:
+
+        tpe = handle.split('_')[0]
+        var = locals()[handle]
+
+        counter = 0
+        while counter < var.white.__len__():
+
+            val = var.white[counter]
+
+            # Use error thrown by list.index to determine if
+            # a given value exists in both the white and black
+            # lists.
+            try:
+
+                # When a value appears in both the black and white list
+                # of a given lists object, remove them both.
+                ind = var.black.index(val)
+                var.white.__delitem__(counter)
+                var.black.__delitem__(ind)
+
+            except ValueError:
+
+                # Increment the counter
+                counter += 1
+                continue
+
+        var.white = list(set(var.white))
+        var.black = list(set(var.black))
+
     # ============================
     # BEGIN EXECUTING THE COMMANDS
     # ============================
+    # Configure reverse name resolution
+    if args.disable_reverse_dns: resolve = False
+    else: resolve = True
+
+    # Configure color printing
+    if args.disable_color: color = False
+    else: color = True
 
     # Analyze and exit
     if args.cmd == 'analyze':
 
         if not args.pcap_files and not args.sqlite_files:
-            raise Exception(
-                'Analyze command requires at least one input file'
-            )
+            print('- Analyze command requires at least one input file.')
+            exit()
 
-        print(analyze(**args.__dict__))
+        print(analyze(
+                    **args.__dict__,
+                    sender_lists=sender_lists,
+                    target_lists=target_lists,
+                    color=color,
+                    resolve=resolve
+                ))
 
     # Capture and exit
     elif args.cmd == 'capture':
 
-        # Configure reverse name resolution
-        if args.disable_reverse_dns: resolve = False
-        else: resolve = True
-
-        # Configure color printing
-        if args.disable_color: color = False
-        else: color = True
     
         try:
     
@@ -874,7 +975,7 @@ if __name__ == '__main__':
                 while not result.ready(): sleep(.2)
     
                 # Clear the screen and print the results
-                stdout.write('\x1b[2J\x1b[H')
+                print('\x1b[2J\x1b[H')
                 output,packets = result.get()
 
                 # Capture packets for the output file
