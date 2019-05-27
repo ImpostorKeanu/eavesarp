@@ -16,6 +16,8 @@ from sqlalchemy.ext.declarative import declarative_base
 from multiprocessing.pool import Pool
 from dns import reversename, resolver
 
+from sys import exit
+
 # =========
 # CONSTANTS
 # =========
@@ -192,17 +194,6 @@ def unpack_packet(packet):
 
     return unpack_arp(packet.getlayer('ARP'))
 
-def check_lists(ip,lists):
-    '''Check an IP against a Lists object to determine if it
-    should be included in output.
-    '''
-
-    if lists.black and ip in lists.black:
-        return False
-    elif lists.white and ip not in lists.white:
-        return False
-
-    return True
 
 def get_output(db_session,order_by=desc,sender_lists=None,
         target_lists=None,ptr=False,color=False,resolve=True):
@@ -235,9 +226,9 @@ def get_output(db_session,order_by=desc,sender_lists=None,
             sender = t.sender.value
             target = t.target.value
             
-            if sender_lists and not check_lists(sender,sender_lists):
+            if sender_lists and not sender_lists.check(sender):
                 continue
-            if target_lists and not check_lists(target,target_lists):
+            if target_lists and not target_lists.check(target):
                 continue
 
             # Building table rows
@@ -254,9 +245,9 @@ def get_output(db_session,order_by=desc,sender_lists=None,
             sender = t.sender.value
             target = t.target.value
 
-            if sender_lists and not check_lists(sender,sender_lists):
+            if sender_lists and not sender_lists.check(sender):
                 continue
-            if target_lists and not check_lists(sender,target_lists):
+            if target_lists and not target_lists.check(target):
                 continue
 
             # Building table rows
@@ -343,10 +334,10 @@ def filter_packet(packet,sender_lists=None,target_lists=None):
     sender,target = packet
 
     if sender_lists:
-        if not check_lists(sender,sender_lists):
+        if not sender_lists.check(sender):
             return False
     if target_lists:
-        if not check_lists(target,target_lists):
+        if not target_lists.check(target):
             return False
 
     return packet
@@ -459,6 +450,7 @@ def async_sniff(interfaces, redraw_frequency, sender_lists,
                 sess,
                 sender_lists=sender_lists,
                 target_lists=target_lists,
+                resolve=resolve,
                 color=color
             )
         )
@@ -476,6 +468,7 @@ def async_sniff(interfaces, redraw_frequency, sender_lists,
             sess,
             sender_lists=sender_lists,
             target_lists=target_lists,
+            resolve=resolve,
             color=color),packets
 
 def analyze(database_output_file, sender_lists=None, target_lists=None,
@@ -590,6 +583,18 @@ class Lists:
     def __repr__(self):
 
         return f'<Lists white:{self.white}, black:{self.black}>'
+
+    def check(self,ip):
+        '''Check an IP against a Lists object to determine if it
+        should be included in output.
+        '''
+    
+        if self.black and ip in self.black:
+            return False
+        elif self.white and ip not in self.white:
+            return False
+        else:
+            return True
 
 if __name__ == '__main__':
     
