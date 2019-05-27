@@ -17,8 +17,9 @@ import colored
 from IPython import embed
 from sys import exit
 
-Base = declarative_base()
+ipv4_re = i4_re = re.compile('^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$')
 
+Base = declarative_base()
 
 class IP(Base):
     '''IP model.
