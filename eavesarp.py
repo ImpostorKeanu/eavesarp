@@ -5,7 +5,6 @@ from pathlib import Path
 from time import sleep
 from os import remove
 from sys import stdout
-from collections import namedtuple
 from tabulate import tabulate
 from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, func, text, ForeignKeyConstraint, UniqueConstraint
 from sqlalchemy import create_engine, asc, desc
@@ -18,9 +17,8 @@ import colored
 from IPython import embed
 from sys import exit
 
-Lists = namedtuple('Lists',['white','black'],defaults=([],[],))
-
 Base = declarative_base()
+
 
 class IP(Base):
     '''IP model.
@@ -162,9 +160,6 @@ def unpack_packet(packet):
     return unpack_arp(packet.getlayer('ARP'))
 
 def check_lists(ip,lists):
-    '''Check an IP address value against a List() namedtuple
-    object.
-    '''
 
     if lists.black and ip in lists.black:
         return False
@@ -202,12 +197,11 @@ def get_output(db_session,order_by=desc,sender_lists=None,
         
             sender = t.sender.value
             target = t.target.value
-
+            
             if sender_lists and not check_lists(sender,sender_lists):
                 continue
             if target_lists and not check_lists(target,target_lists):
                 continue
-
 
             # Building table rows
             if sender not in rowdict:
@@ -216,6 +210,7 @@ def get_output(db_session,order_by=desc,sender_lists=None,
             else:
                 # Add new row to known sender IP
                 rowdict[sender].append(['',target,t.count,'',tptr])
+
         else:
             
             sender = t.sender.value
@@ -301,7 +296,7 @@ def reverse_resolve(ip):
 @validate_packet_unpack
 def filter_packet(packet,sender_lists=None,target_lists=None):
     '''Filter an individual packet. This should be executed in the `lambda`
-    supplied to `do_sniff`. `sender_lists` and `target_lists` should be namedtuple
+    supplied to `do_sniff`. `sender_lists` and `target_lists` should be 
     objects of type `List()`.
     '''
 
@@ -508,6 +503,17 @@ def analyze(database_output_file, sender_lists=None, target_lists=None,
             sender_lists=sender_lists,
             target_lists=target_lists,
             color=color)
+
+class Lists:
+
+    def __init__(self,white=None,black=None):
+
+        self.white = white or []
+        self.black = black or []
+
+    def __repr__(self):
+
+        return f'<Lists white:{self.white}, black:{self.black}>'
 
 if __name__ == '__main__':
     
@@ -738,10 +744,11 @@ if __name__ == '__main__':
     # INITIALIZE WHITELIST/BLACKLIST TUPLES
     # =====================================
 
-    # Initialize white/black list objects for sender and target
-    # addresses
     sender_lists = Lists()
     target_lists = Lists()
+
+    # Initialize white/black list objects for sender and target
+    # addresses
 
     # Compile a regexp for variable names,
     # Used to dynamically pull and populate local variables.
@@ -782,25 +789,22 @@ if __name__ == '__main__':
         gd = match.groupdict() 
         host_type = gd['host_type'] # sender or target
         list_type = gd['list_type'].replace('list','') # white or black
+        var_name = host_type+'_lists'
         
         # Get the appropriate lists object based on name, as crafted
         # from the argument handle, i.e. `sender_lists` or `target_lists`
-        lst = locals()[host_type+'_lists'].__getattribute__(list_type)
+        lst = locals()[var_name].__getattribute__(list_type)
 
         # Files flag is used to determine if records should be slurped
         # from a series of files
-        if gd['files']: files = True
-        else: files = False
-
-        if files:
+        if gd['files']: 
             # Import lines from files
             for fname in arg_val: lst += import_host_list(fname)
-        else:
-            # Append lines from value
+        else: 
             lst += arg_val
 
         lst = set(lst)
-
+    
     # ============================
     # BEGIN EXECUTING THE COMMANDS
     # ============================
