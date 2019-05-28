@@ -194,7 +194,6 @@ def unpack_packet(packet):
 
     return unpack_arp(packet.getlayer('ARP'))
 
-
 def get_output(db_session,order_by=desc,sender_lists=None,
         target_lists=None,ptr=False,color=False,resolve=True):
     '''Extract transaction records from the database and return
@@ -225,11 +224,12 @@ def get_output(db_session,order_by=desc,sender_lists=None,
         
             sender = t.sender.value
             target = t.target.value
-            
+           
             if sender_lists and not sender_lists.check(sender):
                 continue
             if target_lists and not target_lists.check(target):
                 continue
+
 
             # Building table rows
             if sender not in rowdict:
@@ -618,6 +618,20 @@ if __name__ == '__main__':
 
             target.add_argument(*self.args, **self.kwargs)
 
+    whitelist = Argument('--whitelist', '-wl',
+        nargs='+',
+        help='''Global whitelist. Values supplied to this
+        parameter will be added to the whitelist for both
+        senders and targets.
+        ''')
+
+    blacklist = Argument('--blacklist', '-bl',
+        nargs='+',
+        help='''Global blacklist. Values supplied to this
+        parameter will be added to the blacklist for both
+        senders and targets.
+        ''')
+
     sender_whitelist = Argument('--sender-whitelist','-sw',
         nargs='+',
         help='''Capture and analyze requests only when the
@@ -720,17 +734,21 @@ if __name__ == '__main__':
         default='eavesarp_dump.db',
         help='File to receive aggregated output')
 
+    # WHITELISTS
     awfg = aw_filter_group = analyze_parser.add_argument_group(
         'Whitelist IP Filter Parameters'
     )
     
+    whitelist.add(awfg)
     sender_whitelist.add(awfg)
     target_whitelist.add(awfg)
-    
+
+    # BLACKLISTS    
     abfg = ab_filter_group = analyze_parser.add_argument_group(
         'Blacklist IP Filter Parameters'
     )
 
+    blacklist.add(abfg)
     sender_blacklist.add(abfg)
     target_blacklist.add(abfg)
 
@@ -787,6 +805,7 @@ if __name__ == '__main__':
         'Whitelist IP Filter Parameters'
     )
     
+    whitelist.add(whitelist_filter_group)
     sender_whitelist.add(whitelist_filter_group)
     target_whitelist.add(whitelist_filter_group)
     
@@ -795,6 +814,7 @@ if __name__ == '__main__':
         'Whitelist IP Filter Parameters'
     )
 
+    blacklist.add(blacklist_filter_group)
     sender_blacklist.add(blacklist_filter_group)
     target_blacklist.add(blacklist_filter_group)
 
@@ -822,7 +842,36 @@ if __name__ == '__main__':
         '(?P<files>_files)?'
     )
 
-    # Load the whitelists/blacklists
+    # ==============================================
+    # DYNAMICALLY POPULATE GENERAL WHITE/BLACK LISTS
+    # ==============================================
+
+    for list_type in ['white','black']:
+
+        values = []
+
+        vals = args.__dict__[list_type+'list']
+
+        if not vals: continue
+
+        for ival in vals:
+
+            if not validate_ipv4(ival):
+
+                if not Path(ival).exists():
+                    print(
+                        f'Inivalid ipv4 address and unknown file, skipping: {line}'
+                    )
+                else:
+                    lst += ipv4_from_file(ival)
+            else:
+                values.append(ival)
+
+        for host_type in ['sender','target']:
+
+            lst = locals()[host_type+'_lists'].__getattribute__(list_type)
+            lst += values
+
     for arg_handle, arg_val in args.__dict__.items():
 
         # ======================================
@@ -908,6 +957,9 @@ if __name__ == '__main__':
 
         var.white = list(set(var.white))
         var.black = list(set(var.black))
+    
+
+    # Load the whitelists/blacklists
 
     # ============================
     # BEGIN EXECUTING THE COMMANDS
