@@ -800,7 +800,9 @@ if __name__ == '__main__':
 
     args = main_parser.parse_args()
 
-    if not args.cmd: main_parser.print_help() 
+    if not args.cmd:
+        main_parser.print_help() 
+        exit()
 
     # =====================================
     # INITIALIZE WHITELIST/BLACKLIST TUPLES
