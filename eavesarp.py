@@ -18,9 +18,8 @@ from dns import reversename, resolver
 
 from sys import exit
 
-# =========
-# CONSTANTS
-# =========
+# TODO: To make this more like an API, move printing/coloring/output structuring
+# to the interface section
 
 class ColorProfile:
 
@@ -58,9 +57,9 @@ ColorProfiles = {
     'disable':None
 }
 
-# Styles for color printing
-header_style = colored.attr('bold')
-odd_style = colored.fg(244)
+# =========
+# CONSTANTS
+# =========
 
 # Regexp to validate ipv4 structure
 ipv4_re = re.compile('^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$')
@@ -316,11 +315,7 @@ def get_output(db_session,order_by=desc,sender_lists=None,
     headers = ['Sender IP','Target IP','WHO-HAS Count']
     if resolve: headers += ['Sender PTR','Target PTR']
 
-    # Apply color if enabled
-    #if color: headers = [
-    #    colored.stylize(v, header_style) for v in headers
-    #]
-
+    # Color the headers
     if color_profile: headers = color_profile.style_header(headers)
 
     # Return the output as a table
@@ -724,7 +719,8 @@ if __name__ == '__main__':
     color_profile = Argument('--color-profile','-cp',
         default='default',
         choices=list(ColorProfiles.keys()),
-        help='Color profile to use')
+        help=''''Color profile to use. Set to "disable" to remove color
+        altogether.''')
 
     # =============
     # BUILD THE CLI
