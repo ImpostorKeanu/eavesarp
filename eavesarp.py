@@ -2,20 +2,23 @@
 
 import re
 import colored
-from scapy.all import sniff,ARP,wrpcap,rdpcap
+from scapy.all import sniff,ARP,wrpcap,rdpcap,sr
 from pathlib import Path
 from time import sleep
 from os import remove
 from tabulate import tabulate
 from sqlalchemy import (Column, Integer, String, DateTime, ForeignKey,
         func, text, ForeignKeyConstraint, UniqueConstraint,
-        create_engine, asc, desc)
+        create_engine, asc, desc, Boolean)
 from sqlalchemy.orm import (relationship, backref, sessionmaker,
         close_all_sessions)
 from sqlalchemy.ext.declarative import declarative_base
 from multiprocessing.pool import Pool
 from dns import reversename, resolver
 from emoji import emojize
+import socket
+import fcntl
+import struct
 
 from sys import exit
 
@@ -25,7 +28,7 @@ from sys import exit
 class ColorProfile:
 
     def __init__(self,even_color,odd_color,header_color,
-            header_bold=True,sender_emoji=None):
+            header_bold=True,target_emoji=None):
 
         self.even_style = colored.fg(even_color)
         self.odd_style = colored.fg(odd_color)
@@ -33,7 +36,7 @@ class ColorProfile:
         self.header_style = colored.fg(header_color)
         if header_bold: self.header_style += colored.attr('bold')
 
-        self.sender_emoji=sender_emoji
+        self.target_emoji=target_emoji
 
     def style_header(self,headers):
         return self.style_list(headers,self.header_style)
@@ -63,16 +66,16 @@ ColorProfiles = {
     # Novelty color profiles
     'cupcake':ColorProfile(even_color=104, odd_color=164,
         header_color=104, header_bold=True,
-        sender_emoji=emojize(':unicorn_face:')),
+        target_emoji=emojize(':unicorn_face:')),
     'poo':ColorProfile(even_color=136, odd_color=94,
             header_color=136, header_bold=True,
-            sender_emoji=emojize(':pile_of_poo:')),
+            target_emoji=emojize(':pile_of_poo:')),
     'foxhound':ColorProfile(even_color=166, odd_color=179,
             header_color=166, header_bold=True,
-            sender_emoji=emojize(':fox_face:')),
+            target_emoji=emojize(':fox_face:')),
     'rhino':ColorProfile(even_color=254, odd_color=244,
             header_color=254, header_bold=True,
-            sender_emoji=emojize(':rhinoceros:'))
+            target_emoji=emojize(':rhinoceros:'))
 }
 
 # =========
@@ -96,6 +99,12 @@ class IP(Base):
     value = Column(String, nullable=False, unique=True,
             doc='IP address value')
     ptr = relationship('PTR', back_populates='ip')
+    arp_resolve_attempted = Column(Boolean, nullable=False, default=False,
+        doc='''Determines if an ARP request has been made for this host
+        ''')
+    mac_address = Column(String, nullable=True, unique=True,
+        doc='''The MAC address obtained via ARP request.
+        ''')
     sender_transactions = relationship('Transaction',
           back_populates='sender',
           primaryjoin='and_(Transaction.sender_ip_id==IP.id)')
@@ -198,6 +207,38 @@ def unpack_packets(func):
 # FUNCTIONS
 # =========
 
+def get_ip_address(ifname):
+    '''Get the IP address for a given interface name.
+    '''
+    # http://code.activestate.com/recipes/439094-get-the-ip-address-associated-with-a-network-inter/
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    return socket.inet_ntoa(fcntl.ioctl(
+        s.fileno(),
+        0x8915,
+        struct.pack('256s', bytes(ifname[:15],'utf-8'))
+    )[20:24])
+
+def arp_request(interface,target,verbose=0,retry=0,timeout=1):
+    '''Attempt to make an ARP request for the target. Returns
+    the MAC address for the target if successful, None otherwise.
+    '''
+
+    results, unanswered = sr(
+        ARP(
+            op=1,
+            pdst=target,
+        ),
+        iface=interface,
+        retry=retry,
+        verbose=verbose,
+        timeout=timeout
+    )
+
+    if results:
+        return results[0][1].hwsrc
+    else:
+        return None
+
 @validate_file_presence
 def ipv4_from_file(infile):
 
@@ -249,15 +290,10 @@ def unpack_packet(packet):
 
 def get_output(db_session,order_by=desc,sender_lists=None,
         target_lists=None,ptr=False,color_profile=None,
-        resolve=True):
+        resolve=True,active=False):
     '''Extract transaction records from the database and return
     them formatted as a table.
     '''
-
-    if color_profile and color_profile.sender_emoji:
-        semoji = color_profile.sender_emoji
-    else: semoji = ''
-
 
     # Getting all transaction objects
     transactions = db_session.query(Transaction) \
@@ -273,6 +309,58 @@ def get_output(db_session,order_by=desc,sender_lists=None,
     for t in transactions:
 
         # Add a new pair of columns when reverse dns resolution is enabled
+
+#            sender = t.sender.value
+#            target = t.target.value
+#           
+#            if sender_lists and not sender_lists.check(sender):
+#                continue
+#            if target_lists and not target_lists.check(target):
+#                continue
+#
+#            # Building table rows
+#            if sender not in rowdict:
+#                # Initialize new sender IP with initial row
+#                rowdict[sender] = [[sender,target,t.count,sptr,tptr]]
+#            else:
+#                # Add new row to known sender IP
+#                rowdict[sender].append(['',target,t.count,'',tptr])
+
+        # Simplified output when reverse dns is disabled
+            
+        sender = t.sender.value
+        target = t.target.value
+
+        if sender_lists and not sender_lists.check(sender):
+            continue
+        if target_lists and not target_lists.check(target):
+            continue
+
+        # Flag to determine if the sender is new
+        if sender not in rowdict: new_sender = True
+        else: new_sender = False
+
+        # Include sender only on new instances
+        if new_sender: row = [sender,target]
+        else: row = ['',target]
+
+        # Stale IP
+        if active:
+
+            sploit_char = ''
+            if not t.target.mac_address and t.target.arp_resolve_attempted:
+
+                if color_profile and color_profile.target_emoji:
+                    sploit_char = color_profile.target_emoji
+                else:
+                    sploit_char = 'X'
+
+            row.append(sploit_char)
+
+        # Target count
+        row.append(str(t.count))
+
+        # Reverse name resolution
         if resolve:
 
             sptr = ''
@@ -280,42 +368,14 @@ def get_output(db_session,order_by=desc,sender_lists=None,
 
             if t.sender.ptr: sptr = t.sender.ptr[0].value
             if t.target.ptr: tptr = t.target.ptr[0].value
-        
-            sender = t.sender.value
-            target = t.target.value
-           
-            if sender_lists and not sender_lists.check(sender):
-                continue
-            if target_lists and not target_lists.check(target):
-                continue
 
+            if new_sender: row.append(sptr)
+            else: row.append('')
 
-            # Building table rows
-            if sender not in rowdict:
-                # Initialize new sender IP with initial row
-                rowdict[sender] = [[sender,target,t.count,sptr,tptr]]
-            else:
-                # Add new row to known sender IP
-                rowdict[sender].append(['',target,t.count,'',tptr])
+            row.append(tptr)
 
-        # Simplified output when reverse dns is disabled
-        else:
-            
-            sender = t.sender.value
-            target = t.target.value
-
-            if sender_lists and not sender_lists.check(sender):
-                continue
-            if target_lists and not target_lists.check(target):
-                continue
-
-            # Building table rows
-            if sender not in rowdict:
-                # Initialize new sender IP with initial row
-                rowdict[sender] = [[sender,target,str(t.count)]]
-            else:
-                # Add new row to known sender IP
-                rowdict[sender].append(['',target,str(t.count)])
+        if new_sender: rowdict[sender] = [row]
+        else: rowdict[sender].append(row)
 
     # Restructure dictionary into a list of rows
     rows = []
@@ -327,7 +387,6 @@ def get_output(db_session,order_by=desc,sender_lists=None,
         # Color odd rows slightly darker
         if color_profile:
 
-            if irows[0][0]: irows[0][0] = semoji+' '+irows[0][0]
             if counter % 2:
                 rows += [color_profile.style_odd([v for v in r]) for r in irows]
             else:
@@ -337,7 +396,8 @@ def get_output(db_session,order_by=desc,sender_lists=None,
         else: rows += irows
 
     # Build the header
-    headers = ['Sender IP','Target IP','WHO-HAS Count']
+    headers = ['Sender','Target','ARP#']
+    if active: headers.insert(2,'TS')
     if resolve: headers += ['Sender PTR','Target PTR']
 
     # Color the headers
@@ -347,7 +407,6 @@ def get_output(db_session,order_by=desc,sender_lists=None,
     return tabulate(
             rows,
             headers=headers)
-
 
 def create_db(dbfile,overwrite=False):
     '''Initialize the database file and return a session
@@ -439,7 +498,14 @@ def get_or_create_ip(ip,db_session,resolve=False,ptr=None):
     return ip
 
 @unpack_packets
-def handle_packets(packets,db_session,resolve=False):
+def handle_packets(packets,db_session,resolve=False,active=False,interface=None):
+
+    if active:
+
+        if not interface:
+            raise Exception(
+                'Active ARP resolution requires an interface ip'
+            )
 
     for packet in packets:
 
@@ -449,6 +515,14 @@ def handle_packets(packets,db_session,resolve=False):
           # if not, create it
         sender = get_or_create_ip(packet[0],db_session,resolve)
         target = get_or_create_ip(packet[1],db_session,resolve)
+
+        if active and not target.arp_resolve_attempted:
+            hwaddr = arp_request(interface,
+                target.value)
+            if hwaddr:
+                target.mac_address = hwaddr
+            target.arp_resolve_attempted = True
+            db_session.commit()
 
         # Determine if a transaction record for the 
           # target/sender pair exists
@@ -480,15 +554,14 @@ def do_sniff(interfaces,redraw_frequency,sender_lists,target_lists):
         count=redraw_frequency
     )
    
-def async_sniff(interfaces, redraw_frequency, sender_lists,
+def async_sniff(interface, redraw_frequency, sender_lists,
         target_lists, dbfile, analysis_output_file=None, resolve=False, 
-        color_profile=None, verbose=False):
+        color_profile=None, verbose=False, active=False):
     '''This function should be started in a distinct process, allowing
     the one to CTRL^C during execution and gracefully exit the sniffer.
     Not starting the sniffer in a distinct process results in it blocking
     forever or until an inordinate number of keyboard interrupts occur.
     '''
-
 
     # Handle new database file. When verbose, alert user that a new
     # capture must occur prior to printing results.
@@ -511,17 +584,23 @@ def async_sniff(interfaces, redraw_frequency, sender_lists,
                 sender_lists=sender_lists,
                 target_lists=target_lists,
                 resolve=resolve,
-                color_profile=color_profile
+                color_profile=color_profile,
+                active=active
             )
         )
 
     # Capture packets
-    packets = do_sniff(interfaces,
+    packets = do_sniff(interface,
             redraw_frequency, sender_lists,
             target_lists)
 
     # Handle packets (to the db they go, yo)
-    handle_packets(packets,sess,resolve)
+    handle_packets(packets,
+            sess,
+            resolve,
+            active,
+            interface,
+    )
 
     # output,packets
     return get_output(
@@ -529,7 +608,8 @@ def async_sniff(interfaces, redraw_frequency, sender_lists,
             sender_lists=sender_lists,
             target_lists=target_lists,
             resolve=resolve,
-            color_profile=color_profile),packets
+            color_profile=color_profile,
+            active=active),packets
 
 def analyze(database_output_file, sender_lists=None, target_lists=None,
         analysis_output_file=None, pcap_files=[], sqlite_files=[],
@@ -731,7 +811,7 @@ if __name__ == '__main__':
     )
     
     # Reverse DNS Configuration
-    disable_reverse_resolve = Argument('--disable-reverse-dns','-drdns',
+    resolve = Argument('--resolve','-r',
         action='store_true',
         help='''Disable reverse resolution of IP addresses.
         ''')
@@ -773,9 +853,10 @@ if __name__ == '__main__':
         'General Configuration Parameters'
     )
 
-    disable_reverse_resolve.add(general_group)
+    resolve.add(general_group)
     #disable_color.add(general_group)
     color_profile.add(general_group)
+
 
     # INPUT FILES
     input_group = analyze_parser.add_argument_group(
@@ -836,11 +917,19 @@ if __name__ == '__main__':
     )
 
     # Capture interfaces
-    general_group.add_argument('--interfaces','-i',
-        default=['eth0'],
-        nargs='+',
-        help='''Interfaces to sniff from.
+    general_group.add_argument('--interface','-i',
+        default='eth0',
+        help='''Interface to sniff from.
         ''')
+    
+    general_group.add_argument('--active','-a',
+        action='store_true',
+        help='''Set this flag shoud you wish to attempt
+        active ARP requests for target IPs. While this
+        will confirm if a static IP configuration is
+        affecting a given sender, it is an active reconnaissance
+        technique.'''
+    )
 
     # Stdout Configuration
     general_group.add_argument('--redraw-frequency','-rf',
@@ -852,7 +941,7 @@ if __name__ == '__main__':
 
     #disable_color.add(general_group)
     color_profile.add(general_group)
-    disable_reverse_resolve.add(general_group)
+    resolve.add(general_group)
 
     # OUTPUT FILES
     output_group = capture_parser.add_argument_group(
@@ -1032,8 +1121,8 @@ if __name__ == '__main__':
     # BEGIN EXECUTING THE COMMANDS
     # ============================
     # Configure reverse name resolution
-    if args.disable_reverse_dns: resolve = False
-    else: resolve = True
+    #if args.disable_reverse_dns: resolve = False
+    #else: resolve = True
 
     # Configure color printing
     #if args.disable_color: color = False
@@ -1057,7 +1146,6 @@ if __name__ == '__main__':
 
     # Capture and exit
     elif args.cmd == 'capture':
-
     
         try:
     
@@ -1087,14 +1175,16 @@ if __name__ == '__main__':
                 result = pool.apply_async(
                     async_sniff,
                     (
-                        args.interfaces,
+                        args.interface,
                         args.redraw_frequency,
                         sender_lists,
                         target_lists,
                         args.database_output_file,
                         args.analysis_output_file,
-                        resolve,
-                        args.color_profile
+                        args.resolve,
+                        args.color_profile,
+                        True,
+                        args.active
                     )
                 )
     
