@@ -15,6 +15,7 @@ from sqlalchemy.orm import (relationship, backref, sessionmaker,
 from sqlalchemy.ext.declarative import declarative_base
 from multiprocessing.pool import Pool
 from dns import reversename, resolver
+from emoji import emojize
 
 from sys import exit
 
@@ -23,13 +24,16 @@ from sys import exit
 
 class ColorProfile:
 
-    def __init__(self,even_color,odd_color,header_color,header_bold=True):
+    def __init__(self,even_color,odd_color,header_color,
+            header_bold=True,sender_emoji=None):
 
         self.even_style = colored.fg(even_color)
         self.odd_style = colored.fg(odd_color)
 
         self.header_style = colored.fg(header_color)
         if header_bold: self.header_style += colored.attr('bold')
+
+        self.sender_emoji=sender_emoji
 
     def style_header(self,headers):
         return self.style_list(headers,self.header_style)
@@ -44,6 +48,8 @@ class ColorProfile:
         return [colored.stylize(v,style) for v in values]
 
 ColorProfiles = {
+    'disable':None,
+    # Practical color profiles
     'default':ColorProfile(even_color=254, odd_color=244,
             header_color=254, header_bold=True),
     '1337':ColorProfile(even_color=28, odd_color=118,
@@ -54,9 +60,19 @@ ColorProfiles = {
             header_color=9, header_bold=True),
     'cobalt':ColorProfile(even_color=245, odd_color=26,
             header_color=245, header_bold=True),
+    # Novelty color profiles
     'cupcake':ColorProfile(even_color=104, odd_color=164,
-            header_color=104, header_bold=True),
-    'disable':None
+        header_color=104, header_bold=True,
+        sender_emoji=emojize(':unicorn_face:')),
+    'poo':ColorProfile(even_color=136, odd_color=94,
+            header_color=136, header_bold=True,
+            sender_emoji=emojize(':pile_of_poo:')),
+    'foxhound':ColorProfile(even_color=166, odd_color=179,
+            header_color=166, header_bold=True,
+            sender_emoji=emojize(':fox_face:')),
+    'rhino':ColorProfile(even_color=254, odd_color=244,
+            header_color=254, header_bold=True,
+            sender_emoji=emojize(':rhinoceros:'))
 }
 
 # =========
@@ -238,6 +254,11 @@ def get_output(db_session,order_by=desc,sender_lists=None,
     them formatted as a table.
     '''
 
+    if color_profile and color_profile.sender_emoji:
+        semoji = color_profile.sender_emoji
+    else: semoji = ''
+
+
     # Getting all transaction objects
     transactions = db_session.query(Transaction) \
             .order_by(desc(Transaction.count)) \
@@ -299,12 +320,14 @@ def get_output(db_session,order_by=desc,sender_lists=None,
     # Restructure dictionary into a list of rows
     rows = []
     counter = 0
+
     for sender,irows in rowdict.items():
         counter += 1
 
         # Color odd rows slightly darker
         if color_profile:
 
+            if irows[0][0]: irows[0][0] = semoji+' '+irows[0][0]
             if counter % 2:
                 rows += [color_profile.style_odd([v for v in r]) for r in irows]
             else:
