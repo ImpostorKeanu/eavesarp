@@ -22,6 +22,42 @@ from sys import exit
 # CONSTANTS
 # =========
 
+class ColorProfile:
+
+    def __init__(self,even_color,odd_color,header_color,header_bold=True):
+
+        self.even_style = colored.fg(even_color)
+        self.odd_style = colored.fg(odd_color)
+
+        self.header_style = colored.fg(header_color)
+        if header_bold: self.header_style += colored.attr('bold')
+
+    def style_header(self,headers):
+        return self.style_list(headers,self.header_style)
+
+    def style_even(self,values):
+        return self.style_list(values,self.even_style)
+
+    def style_odd(self,values):
+        return self.style_list(values,self.odd_style)
+
+    def style_list(self, values, style):
+        return [colored.stylize(v,style) for v in values]
+
+ColorProfiles = {
+    'default':ColorProfile(even_color=254, odd_color=244,
+            header_color=254, header_bold=True),
+    '1337':ColorProfile(even_color=28, odd_color=118,
+            header_color=28, header_bold=True),
+    'agent_orange':ColorProfile(even_color=166, odd_color=179,
+            header_color=166, header_bold=True),
+    'evil':ColorProfile(even_color=124, odd_color=9,
+            header_color=9, header_bold=True),
+    'cobalt':ColorProfile(even_color=245, odd_color=26,
+            header_color=245, header_bold=True),
+    'disable':None
+}
+
 # Styles for color printing
 header_style = colored.attr('bold')
 odd_style = colored.fg(244)
@@ -195,7 +231,8 @@ def unpack_packet(packet):
     return unpack_arp(packet.getlayer('ARP'))
 
 def get_output(db_session,order_by=desc,sender_lists=None,
-        target_lists=None,ptr=False,color=False,resolve=True):
+        target_lists=None,ptr=False,color_profile=None,
+        resolve=True):
     '''Extract transaction records from the database and return
     them formatted as a table.
     '''
@@ -265,12 +302,12 @@ def get_output(db_session,order_by=desc,sender_lists=None,
         counter += 1
 
         # Color odd rows slightly darker
-        if color:
+        if color_profile:
 
             if counter % 2:
-                rows += irows
+                rows += [color_profile.style_odd([v for v in r]) for r in irows]
             else:
-                rows += [[colored.stylize(v, odd_style) for v in r] for r in irows]
+                rows += [color_profile.style_even(r) for r in irows]
 
         # Just add the rows otherwise
         else: rows += irows
@@ -280,9 +317,11 @@ def get_output(db_session,order_by=desc,sender_lists=None,
     if resolve: headers += ['Sender PTR','Target PTR']
 
     # Apply color if enabled
-    if color: headers = [
-        colored.stylize(v, header_style) for v in headers
-    ]
+    #if color: headers = [
+    #    colored.stylize(v, header_style) for v in headers
+    #]
+
+    if color_profile: headers = color_profile.style_header(headers)
 
     # Return the output as a table
     return tabulate(
@@ -423,12 +462,13 @@ def do_sniff(interfaces,redraw_frequency,sender_lists,target_lists):
    
 def async_sniff(interfaces, redraw_frequency, sender_lists,
         target_lists, dbfile, analysis_output_file=None, resolve=False, 
-        color=False, verbose=False):
+        color_profile=None, verbose=False):
     '''This function should be started in a distinct process, allowing
     the one to CTRL^C during execution and gracefully exit the sniffer.
     Not starting the sniffer in a distinct process results in it blocking
     forever or until an inordinate number of keyboard interrupts occur.
     '''
+
 
     # Handle new database file. When verbose, alert user that a new
     # capture must occur prior to printing results.
@@ -451,7 +491,7 @@ def async_sniff(interfaces, redraw_frequency, sender_lists,
                 sender_lists=sender_lists,
                 target_lists=target_lists,
                 resolve=resolve,
-                color=color
+                color_profile=color_profile
             )
         )
 
@@ -469,11 +509,11 @@ def async_sniff(interfaces, redraw_frequency, sender_lists,
             sender_lists=sender_lists,
             target_lists=target_lists,
             resolve=resolve,
-            color=color),packets
+            color_profile=color_profile),packets
 
 def analyze(database_output_file, sender_lists=None, target_lists=None,
         analysis_output_file=None, pcap_files=[], sqlite_files=[],
-        color=False, resolve=True, *args, **kwargs):
+        color_profile=None, resolve=True, *args, **kwargs):
     '''Create a new database and populate it with records stored in
     each type of input file.
     '''
@@ -570,7 +610,7 @@ def analyze(database_output_file, sender_lists=None, target_lists=None,
             outdb_sess,
             sender_lists=sender_lists,
             target_lists=target_lists,
-            color=color,
+            color_profile=color_profile,
             resolve=resolve)
 
 class Lists:
@@ -681,6 +721,11 @@ if __name__ == '__main__':
         action='store_true',
         help='''Disable colored printing''')
 
+    color_profile = Argument('--color-profile','-cp',
+        default='default',
+        choices=list(ColorProfiles.keys()),
+        help='Color profile to use')
+
     # =============
     # BUILD THE CLI
     # =============
@@ -708,7 +753,8 @@ if __name__ == '__main__':
     )
 
     disable_reverse_resolve.add(general_group)
-    disable_color.add(general_group)
+    #disable_color.add(general_group)
+    color_profile.add(general_group)
 
     # INPUT FILES
     input_group = analyze_parser.add_argument_group(
@@ -783,7 +829,8 @@ if __name__ == '__main__':
         are sniffed from the interface.
         ''')
 
-    disable_color.add(general_group)
+    #disable_color.add(general_group)
+    color_profile.add(general_group)
     disable_reverse_resolve.add(general_group)
 
     # OUTPUT FILES
@@ -862,10 +909,9 @@ if __name__ == '__main__':
                     print(
                         f'Inivalid ipv4 address and unknown file, skipping: {line}'
                     )
-                else:
-                    lst += ipv4_from_file(ival)
-            else:
-                values.append(ival)
+                else: vals += ipv4_from_file(ival)
+
+            else: values.append(ival)
 
         for host_type in ['sender','target']:
 
@@ -969,8 +1015,10 @@ if __name__ == '__main__':
     else: resolve = True
 
     # Configure color printing
-    if args.disable_color: color = False
-    else: color = True
+    #if args.disable_color: color = False
+    #else: color = True
+
+    args.color_profile = ColorProfiles[args.color_profile]
 
     # Analyze and exit
     if args.cmd == 'analyze':
@@ -983,7 +1031,6 @@ if __name__ == '__main__':
                     **args.__dict__,
                     sender_lists=sender_lists,
                     target_lists=target_lists,
-                    color=color,
                     resolve=resolve
                 ))
 
@@ -1014,6 +1061,7 @@ if __name__ == '__main__':
 
             # Loop eternally
             while True:
+
     
                 result = pool.apply_async(
                     async_sniff,
@@ -1025,8 +1073,7 @@ if __name__ == '__main__':
                         args.database_output_file,
                         args.analysis_output_file,
                         resolve,
-                        color,
-                        True
+                        args.color_profile
                     )
                 )
     
@@ -1064,7 +1111,6 @@ if __name__ == '__main__':
                             sess,
                             sender_lists=sender_lists,
                             target_lists=target_lists,
-                            color=False
                         )+'\n'
                     )
     
