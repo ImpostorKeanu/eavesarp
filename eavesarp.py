@@ -54,6 +54,8 @@ ColorProfiles = {
             header_color=9, header_bold=True),
     'cobalt':ColorProfile(even_color=245, odd_color=26,
             header_color=245, header_bold=True),
+    'cupcake':ColorProfile(even_color=104, odd_color=164,
+            header_color=104, header_bold=True),
     'disable':None
 }
 
