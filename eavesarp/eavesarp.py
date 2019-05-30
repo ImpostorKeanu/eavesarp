@@ -172,6 +172,7 @@ def get_output(db_session,order_by=desc,sender_lists=None,
 
             sptr,sfwd = '',''
             tptr,tfwd = '',''
+            mitm_op = False
 
             if t.sender.ptr:
                 sptr = t.sender.ptr[0].value
@@ -183,6 +184,9 @@ def get_output(db_session,order_by=desc,sender_lists=None,
                 if t.target.ptr[0].forward_ip:
                     tptr = f'{tptr} ({t.target.ptr[0].forward_ip})'
 
+                if t.stale_target and t.target.ptr[0].forward_ip != t.target.value:
+                    mitm_op = True
+
             #if new_sender: row += [sptr,sfwd]
             #else: row += ['','']
             if new_sender: row.append(sptr)
@@ -190,6 +194,7 @@ def get_output(db_session,order_by=desc,sender_lists=None,
 
             #row += [tptr,tfwd]
             row.append(tptr)
+            row.append(mitm_op)
         
         if t.stale_target: row.insert(1,stale_emoji)
         else: row.insert(1,'')
@@ -218,7 +223,8 @@ def get_output(db_session,order_by=desc,sender_lists=None,
     # Build the header
     headers = ['ARP#','S','Sender','Target','Target MAC']
     #if reverse_resolve: headers += ['Sender PTR','Sender Forward','Target PTR','Target Forward']
-    if reverse_resolve: headers += ['Sender PTR (PTR > FWD)','Target PTR (PTR > FWD)']
+    if reverse_resolve: headers += ['Sender PTR (PTR > FWD)',
+            'Target PTR (PTR > FWD)','Target IP != Forward IP']
 
     # Color the headers
     if color_profile: headers = color_profile.style_header(headers)
