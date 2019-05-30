@@ -105,7 +105,7 @@ def unpack_arp(arp):
     in a tuple: `(target,sender)`
     '''
 
-    return arp.psrc,arp.pdst
+    return arp.psrc,arp.hwsrc,arp.pdst
 
 def unpack_packet(packet):
     '''Extract and return the ARP layer from a packet object.
@@ -115,7 +115,7 @@ def unpack_packet(packet):
 
 def get_output(db_session,order_by=desc,sender_lists=None,
         target_lists=None,ptr=False,color_profile=None,
-        resolve=True,active=False):
+        reverse_resolve=True,arp_resolve=False):
     '''Extract transaction records from the database and return
     them formatted as a table.
     '''
@@ -133,7 +133,9 @@ def get_output(db_session,order_by=desc,sender_lists=None,
     # Organize all the records by sender IP
     rowdict = {}
     for t in transactions:
-            
+
+        smac = t.sender.mac_address
+
         sender = t.sender.value
         target = t.target.value
 
@@ -141,44 +143,56 @@ def get_output(db_session,order_by=desc,sender_lists=None,
             continue
         if target_lists and not target_lists.check(target):
             continue
+        
+        # Target count
+        row = [str(t.count)]
 
         # Flag to determine if the sender is new
         if sender not in rowdict: new_sender = True
         else: new_sender = False
 
         # Include sender only on new instances
-        if new_sender: row = [sender,target]
-        else: row = ['',target]
+        if new_sender: row += [sender,target]
+        else: row += ['',target]
 
         # Stale IP
-        if active:
+        
+        stale_emoji = 'X'
+        if color_profile and color_profile.target_emoji:
+            stale_emoji = color_profile.target_emoji
 
-            sploit_char = ''
-            if not t.target.mac_address and t.target.arp_resolve_attempted:
-
-                if color_profile and color_profile.target_emoji:
-                    sploit_char = color_profile.target_emoji
-                else:
-                    sploit_char = 'X'
-
-            row.append(sploit_char)
-
-        # Target count
-        row.append(str(t.count))
-
+        if t.stale_target:
+            row.append('[STALE TARGET]')
+        elif t.target.mac_address:
+            row.append(t.target.mac_address)
+        else: row.append('[UNRESOLVED]')
+        
         # Reverse name resolution
-        if resolve:
+        if reverse_resolve:
 
-            sptr = ''
-            tptr = ''
+            sptr,sfwd = '',''
+            tptr,tfwd = '',''
 
-            if t.sender.ptr: sptr = t.sender.ptr[0].value
-            if t.target.ptr: tptr = t.target.ptr[0].value
+            if t.sender.ptr:
+                sptr = t.sender.ptr[0].value
+                if t.sender.ptr[0].forward_ip:
+                    sptr = f'{sptr} ({t.sender.ptr[0].forward_ip})'               
 
+            if t.target.ptr:
+                tptr = t.target.ptr[0].value
+                if t.target.ptr[0].forward_ip:
+                    tptr = f'{tptr} ({t.target.ptr[0].forward_ip})'
+
+            #if new_sender: row += [sptr,sfwd]
+            #else: row += ['','']
             if new_sender: row.append(sptr)
             else: row.append('')
 
+            #row += [tptr,tfwd]
             row.append(tptr)
+        
+        if t.stale_target: row.insert(1,stale_emoji)
+        else: row.insert(1,'')
 
         if new_sender: rowdict[sender] = [row]
         else: rowdict[sender].append(row)
@@ -202,9 +216,9 @@ def get_output(db_session,order_by=desc,sender_lists=None,
         else: rows += irows
 
     # Build the header
-    headers = ['Sender','Target','ARP#']
-    if active: headers.insert(2,'TS')
-    if resolve: headers += ['Sender PTR','Target PTR']
+    headers = ['ARP#','S','Sender','Target','Target MAC']
+    #if reverse_resolve: headers += ['Sender PTR','Sender Forward','Target PTR','Target Forward']
+    if reverse_resolve: headers += ['Sender PTR (PTR > FWD)','Target PTR (PTR > FWD)']
 
     # Color the headers
     if color_profile: headers = color_profile.style_header(headers)
@@ -235,17 +249,29 @@ def create_db(dbfile,overwrite=False):
 
     return Session()
 
-def reverse_resolve(ip):
+def reverse_dns_resolve(ip):
     '''Attempt reverse name resolution on an IP address. Returns
     `None` upon exception, which occurs when an address without a
     PTR record is requested.
     '''
     
     try:
+
         rev_name = reversename.from_address(ip)
-        return resolver.query(rev_name,'PTR')[0].__str__()
+        r = resolver.query(rev_name,'PTR')[0].__str__()
+        
+        # Do forward lookup of reverse name since the new IP
+        # may differ
+        try:
+            f = resolver.query(r)[0].__str__()
+        except:
+            f = None
+
+        return r,f        
+
     except:
-        return None
+
+        return None,None
 
 @validate_packet_unpack
 def filter_packet(packet,sender_lists=None,target_lists=None):
@@ -255,7 +281,7 @@ def filter_packet(packet,sender_lists=None,target_lists=None):
     '''
 
     if not packet: return False
-    sender,target = packet
+    sender,shw,target = packet
 
     if sender_lists:
         if not sender_lists.check(sender):
@@ -266,8 +292,8 @@ def filter_packet(packet,sender_lists=None,target_lists=None):
 
     return packet
 
-def get_or_create_ip(ip, db_session, resolve=False, ptr=None,
-        interface=None, active=False):
+def get_or_create_ip(ip, db_session, reverse_resolve=False, ptr=None,
+        interface=None, arp_resolve=False, mac=None):
     '''Get or create an IP object from the SQLite database. Also
     handles:
 
@@ -279,7 +305,10 @@ def get_or_create_ip(ip, db_session, resolve=False, ptr=None,
 
     if not db_ip:
 
-        ip = IP(value=ip)
+        ip = IP(value=ip,mac_address=mac)
+
+        if mac: ip.arp_resolve_attempted = True
+
         db_session.add(ip)
         db_session.commit()
 
@@ -291,18 +320,22 @@ def get_or_create_ip(ip, db_session, resolve=False, ptr=None,
             )
 
         # Attempt to resolve the PTR address
-        elif resolve:
+        elif reverse_resolve:
 
-            ptr = reverse_resolve(ip.value)
+            ptr,forward_ip = reverse_dns_resolve(ip.value)
 
             if ptr:
 
                 db_session.add(
-                    PTR(ip_id=ip.id,value=ptr)
+                    PTR(ip_id=ip.id,
+                        value=ptr,
+                        forward_ip=forward_ip)
                 )
 
+            ip.reverse_dns_attempted = True
+
         # Handle ARP request if active is enabled
-        if active and not ip.arp_resolve_attempted:
+        if arp_resolve and not ip.arp_resolve_attempted:
 
             hwaddr = arp_request(interface,
                 ip.value)
@@ -312,17 +345,43 @@ def get_or_create_ip(ip, db_session, resolve=False, ptr=None,
 
         db_session.commit()
 
-    else: ip = db_ip
+    else:
+        
+        ip = db_ip
+
+        if reverse_resolve and not ip.reverse_dns_attempted:
+
+            ptr,forward_ip = reverse_dns_resolve(ip.value)
+
+            if ptr:
+
+                db_session.add(
+                    PTR(ip_id=ip.id,
+                        value=ptr,
+                        forward_ip=forward_ip)
+                )
+
+            ip.reverse_dns_attempted = True
+            db_session.commit()
+
+        if arp_resolve and not db_ip.mac_address and not ip.arp_resolve_attempted:
+
+            hwaddr = arp_request(interface,
+                ip.value)
+            if hwaddr: ip.mac_address = hwaddr
+            ip.arp_resolve_attempted = True
+
+            db_session.commit()
 
     return ip
 
 @unpack_packets
-def handle_packets(packets,db_session,resolve=False,
-        active=False,interface=None):
+def handle_packets(packets,db_session,reverse_resolve=False,
+        arp_resolve=False,interface=None):
     '''Handle packets capture from the interface.
     '''
 
-    if active:
+    if arp_resolve:
 
         if not interface:
             raise Exception(
@@ -331,12 +390,19 @@ def handle_packets(packets,db_session,resolve=False,
 
     for packet in packets:
 
-        sender,target = packet
+        sender,shw,target = packet
 
         # GET/CREATE database objects
-        sender = get_or_create_ip(packet[0],db_session,resolve)
-        target = get_or_create_ip(packet[1],db_session,resolve,
-            active=active, interface=interface)
+        sender = get_or_create_ip(sender,
+                db_session,
+                reverse_resolve,
+                mac=shw)
+
+        target = get_or_create_ip(target,
+                db_session,
+                reverse_resolve,
+                arp_resolve=arp_resolve,
+                interface=interface)
 
         # Determine if a transaction record for the 
           # target/sender pair exists
@@ -357,6 +423,11 @@ def handle_packets(packets,db_session,resolve=False,
         else:
 
             transaction.count += 1
+        
+        # Populate stale field in transaction when appropriate
+        if not target.mac_address and target.arp_resolve_attempted:
+            transaction.stale_target = True
+
 
         db_session.commit()
 
@@ -370,8 +441,8 @@ def do_sniff(interfaces,redraw_frequency,sender_lists,target_lists):
     )
    
 def async_sniff(interface, redraw_frequency, sender_lists,
-        target_lists, dbfile, analysis_output_file=None, resolve=False, 
-        color_profile=None, verbose=False, active=False):
+        target_lists, dbfile, analysis_output_file=None, reverse_resolve=False, 
+        color_profile=None, verbose=False, arp_resolve=False):
     '''This function should be started in a distinct process, allowing
     the one to CTRL^C during execution and gracefully exit the sniffer.
     Not starting the sniffer in a distinct process results in it blocking
@@ -398,9 +469,9 @@ def async_sniff(interface, redraw_frequency, sender_lists,
                 sess,
                 sender_lists=sender_lists,
                 target_lists=target_lists,
-                resolve=resolve,
+                reverse_resolve=reverse_resolve,
                 color_profile=color_profile,
-                active=active
+                arp_resolve=arp_resolve
             )
         )
 
@@ -412,8 +483,8 @@ def async_sniff(interface, redraw_frequency, sender_lists,
     # Handle packets (to the db they go, yo)
     handle_packets(packets,
             sess,
-            resolve,
-            active,
+            reverse_resolve,
+            arp_resolve,
             interface,
     )
 
@@ -422,13 +493,13 @@ def async_sniff(interface, redraw_frequency, sender_lists,
             sess,
             sender_lists=sender_lists,
             target_lists=target_lists,
-            resolve=resolve,
+            reverse_resolve=reverse_resolve,
             color_profile=color_profile,
-            active=active),packets
+            arp_resolve=arp_resolve),packets
 
 def analyze(database_output_file, sender_lists=None, target_lists=None,
         analysis_output_file=None, pcap_files=[], sqlite_files=[],
-        color_profile=None, resolve=True, *args, **kwargs):
+        color_profile=None, reverse_resolve=True, *args, **kwargs):
     '''Create a new database and populate it with records stored in
     each type of input file.
     '''
@@ -468,8 +539,8 @@ def analyze(database_output_file, sender_lists=None, target_lists=None,
             # HANDLE IP OBJECTS
             # =================
 
-            sender = get_or_create_ip(t.sender.value,outdb_sess,ptr=sptr)
-            target = get_or_create_ip(t.target.value,outdb_sess,ptr=tptr)
+            sender = get_or_create_ip(t.sender.value,outdb_sess,ptr=sptr,mac=t.sender.mac_address)
+            target = get_or_create_ip(t.target.value,outdb_sess,ptr=tptr,mac=t.target.mac_address)
 
             # ======================
             # HANDLE THE TRANSACTION
@@ -481,12 +552,7 @@ def analyze(database_output_file, sender_lists=None, target_lists=None,
 
             if transaction:
 
-                it = outdb_sess.query(Transaction).filter(
-                    Transaction.sender_ip_id==sender.id,
-                    Transaction.target_ip_id==target.id
-                ).first()
-
-                it.count += t.count
+                transaction.count += t.count
 
             else:
 
@@ -494,7 +560,8 @@ def analyze(database_output_file, sender_lists=None, target_lists=None,
                     Transaction(
                         sender_ip_id=sender.id,
                         target_ip_id=target.id,
-                        count=t.count
+                        count=t.count,
+                        stale_target=t.stale_target
                     )
                 )
 
@@ -526,5 +593,5 @@ def analyze(database_output_file, sender_lists=None, target_lists=None,
             sender_lists=sender_lists,
             target_lists=target_lists,
             color_profile=color_profile,
-            resolve=resolve)
+            reverse_resolve=reverse_resolve)
 

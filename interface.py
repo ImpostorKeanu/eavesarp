@@ -3,6 +3,7 @@
 import argparse
 from eavesarp.eavesarp import *
 from eavesarp.color import ColorProfiles
+import signal
 
 # ===================
 # CONSTANTS/FUNCTIONS
@@ -107,7 +108,7 @@ analysis_output_file = Argument('--analysis-output-file','-aof',
 )
 
 # Reverse DNS Configuration
-resolve = Argument('--resolve','-r',
+reverse_resolve = Argument('--reverse-resolve','-rr',
     action='store_true',
     help='''Disable reverse resolution of IP addresses.
     ''')
@@ -145,7 +146,7 @@ if __name__ == '__main__':
         'General Configuration Parameters'
     )
 
-    resolve.add(general_group)
+    reverse_resolve.add(general_group)
     color_profile.add(general_group)
 
 
@@ -213,7 +214,7 @@ if __name__ == '__main__':
         help='''Interface to sniff from.
         ''')
     
-    general_group.add_argument('--active','-a',
+    general_group.add_argument('--arp-resolve','-ar',
         action='store_true',
         help='''Set this flag shoud you wish to attempt
         active ARP requests for target IPs. While this
@@ -231,7 +232,7 @@ if __name__ == '__main__':
         ''')
 
     color_profile.add(general_group)
-    resolve.add(general_group)
+    reverse_resolve.add(general_group)
 
     # OUTPUT FILES
     output_group = capture_parser.add_argument_group(
@@ -424,11 +425,14 @@ if __name__ == '__main__':
                     **args.__dict__,
                     sender_lists=sender_lists,
                     target_lists=target_lists,
-                    resolve=resolve
                 ))
 
     # Capture and exit
     elif args.cmd == 'capture':
+
+        osigint = signal.signal(signal.SIGINT,signal.SIG_IGN)
+        pool = Pool(1)
+        signal.signal(signal.SIGINT, osigint)
     
         try:
     
@@ -445,8 +449,9 @@ if __name__ == '__main__':
             TODO: It may be easier to use threading. Pool methods were fresh
             to me at the time of original development.
             '''
+
+
     
-            pool = Pool(1)
 
             # Cache packets that will be written to output file
             pkts = []
@@ -464,10 +469,10 @@ if __name__ == '__main__':
                         target_lists,
                         args.database_output_file,
                         args.analysis_output_file,
-                        args.resolve,
+                        args.reverse_resolve,
                         args.color_profile,
                         True,
-                        args.active
+                        args.arp_resolve
                     )
                 )
     

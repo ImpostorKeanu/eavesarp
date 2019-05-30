@@ -21,6 +21,9 @@ class IP(Base):
     arp_resolve_attempted = Column(Boolean, nullable=False, default=False,
         doc='''Determines if an ARP request has been made for this host
         ''')
+    reverse_dns_attempted = Column(Boolean, nullable=False, default=False,
+        doc='''Determines if an ARP request has been made for this host
+        ''')
     mac_address = Column(String, nullable=True, unique=True,
         doc='''The MAC address obtained via ARP request.
         ''')
@@ -48,6 +51,9 @@ class PTR(Base):
     id = Column(Integer, primary_key=True)
     ip_id = Column(Integer, ForeignKey(IP.id), nullable=False,unique=True)
     ip = relationship('IP', back_populates='ptr')
+    forward_ip = Column(String, nullable=True,
+        doc='''Forward IP resolved from reverse IP.
+        ''')
     value = Column(String, nullable=False, unique=True,
             doc='PTR value')
 
@@ -60,6 +66,9 @@ class Transaction(Base):
     sender_ip_id = Column(Integer,nullable=False)
     target_ip_id = Column(Integer,nullable=False)
     count = Column(Integer,default=1)
+    stale_target = Column(Boolean, nullable=False, default=False,
+        doc='''Determines if a given target is stale
+        ''')
     sender = relationship('IP',
          back_populates='sender_transactions',
          primaryjoin='and_(Transaction.sender_ip_id==IP.id)')
