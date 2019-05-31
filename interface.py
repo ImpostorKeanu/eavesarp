@@ -3,7 +3,7 @@
 import argparse
 from eavesarp.eavesarp import *
 from eavesarp.color import ColorProfiles
-from eavesarp.field_builders import *
+from sys import exit
 import signal
 
 # ===================
@@ -12,6 +12,28 @@ import signal
 
 # Regexp to validate ipv4 structure
 ipv4_re = re.compile('^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$')
+
+COL_MAP = {
+    'arp_count':'ARP#',
+    'sender':'Sender',
+    'sender_mac':'Sender MAC',
+    'target':'Target',
+    'target_mac':'Target MAC',
+    'stale':'Stale',
+    'sender_ptr':'Sender PTR (PTR > FWD)',
+    'target_ptr':'Target PTR (PTR > FWD)',
+    'mitm_op':'Target IP != Forward IP'
+}
+
+COL_ORDER = [
+    'arp_count',
+    'sender',
+    'target',
+    'stale',
+    'sender_ptr',
+    'target_ptr',
+    'mitm_op'
+]
 
 @validate_file_presence
 def ipv4_from_file(infile):
@@ -39,22 +61,10 @@ def validate_ipv4(val):
 
 def get_output(db_session,order_by=desc,sender_lists=None,
         target_lists=None,ptr=False,color_profile=None,
-        reverse_resolve=True,arp_resolve=False,col_order=[]):
+        reverse_resolve=True,arp_resolve=False,columns=COL_ORDER):
     '''Extract transaction records from the database and return
     them formatted as a table.
     '''
-
-    if not col_order:
-
-        col_order = [
-            'arp_count',
-            'sender',
-            'target',
-            'target_stale',
-            'sender_ptr',
-            'target_ptr',
-            'mitm_op'
-        ]
 
     transactions = get_transactions(db_session,order_by)
 
@@ -76,36 +86,35 @@ def get_output(db_session,order_by=desc,sender_lists=None,
             continue
         if target_lists and not target_lists.check(target):
             continue
-        
-        # Target count
-        row = [str(t.count)]
 
         # Flag to determine if the sender is new
         if sender not in rowdict: new_sender = True
         else: new_sender = False
 
-        # Include sender only on new instances
-        if new_sender: row += [sender,target]
-        else: row += ['',target]
+        row = []
 
-        row.append(build_target_mac(t))
-        
-        # Reverse name resolution
-        if reverse_resolve:
+        for col in columns:
 
-            sptr,tptr = build_reverse_resolve(t)
+            if col == 'sender':
 
-            # Show sender ptr only once in column
-            if new_sender: row.append(sptr)
-            else: row.append('')
+                if new_sender: row.append(sender)
+                else: row.append('')
 
-            # Append the target pointer field
-            row.append(tptr)
+            elif col == 'target':
 
-            # Append the mitm_op field
-            row.append(build_mitm_op(t))
+                row.append(target)
 
-        row.insert(1,build_stale(t,color_profile))
+            elif col == 'stale':
+
+                row.append(t.build_stale(color_profile))
+
+            else:
+
+                if col == 'arp_count': col = 'count'
+
+                row.append(
+                    t.bfh('build_'+col,new_sender=new_sender)
+                )
 
         if new_sender: rowdict[sender] = [row]
         else: rowdict[sender].append(row)
@@ -128,11 +137,7 @@ def get_output(db_session,order_by=desc,sender_lists=None,
         # Just add the rows otherwise
         else: rows += irows
 
-    # Build the header
-    headers = ['ARP#','S','Sender','Target','Target MAC']
-    #if reverse_resolve: headers += ['Sender PTR','Sender Forward','Target PTR','Target Forward']
-    if reverse_resolve: headers += ['Sender PTR (PTR > FWD)',
-            'Target PTR (PTR > FWD)','Target IP != Forward IP']
+    headers = [COL_MAP[col] for col in columns]
 
     # Color the headers
     if color_profile: headers = color_profile.style_header(headers)
@@ -214,6 +219,14 @@ analysis_output_file = Argument('--analysis-output-file','-aof',
     '''
 )
 
+output_columns = Argument('--output-columns','-oc',
+    default=COL_ORDER,
+    nargs='+',
+    help='''Space delimited list of columns to show in output.
+    Columns will be displayed in the order as provided. Default:
+    %(default)s
+    ''')
+
 # Reverse DNS Configuration
 reverse_resolve = Argument('--reverse-resolve','-rr',
     action='store_true',
@@ -255,6 +268,7 @@ if __name__ == '__main__':
 
     reverse_resolve.add(general_group)
     color_profile.add(general_group)
+    output_columns.add(general_group)
 
 
     # INPUT FILES
@@ -321,15 +335,6 @@ if __name__ == '__main__':
         help='''Interface to sniff from.
         ''')
     
-    general_group.add_argument('--arp-resolve','-ar',
-        action='store_true',
-        help='''Set this flag shoud you wish to attempt
-        active ARP requests for target IPs. While this
-        will confirm if a static IP configuration is
-        affecting a given sender, it is an active reconnaissance
-        technique.'''
-    )
-
     # Stdout Configuration
     general_group.add_argument('--redraw-frequency','-rf',
         default=5,
@@ -339,7 +344,17 @@ if __name__ == '__main__':
         ''')
 
     color_profile.add(general_group)
+
     reverse_resolve.add(general_group)
+    
+    general_group.add_argument('--arp-resolve','-ar',
+        action='store_true',
+        help='''Set this flag shoud you wish to attempt
+        active ARP requests for target IPs. While this
+        will confirm if a static IP configuration is
+        affecting a given sender, it is an active reconnaissance
+        technique.'''
+    )
 
     # OUTPUT FILES
     output_group = capture_parser.add_argument_group(
@@ -354,6 +369,8 @@ if __name__ == '__main__':
     output_group.add_argument('--pcap-output-file','-pof',
         help='''Name of file to dump captured packets
         ''')
+
+    output_columns.add(output_group)
 
     # Address whitelist filters
     whitelist_filter_group = capture_parser.add_argument_group(
@@ -381,6 +398,27 @@ if __name__ == '__main__':
     if not args.cmd:
         main_parser.print_help() 
         exit()
+
+    # ============================
+    # CHECKING COLUMN ORDER VALUES
+    # ============================
+
+    if hasattr(args,'output_columns'):
+
+        if not args.output_columns:
+            print('- Output columns are required')
+            print('Exiting!')
+            exit()
+
+        vals = COL_MAP.keys()
+        bad = [v for v in args.output_columns if not v in vals]
+
+        if bad:
+
+            print('- Invalid column values provided: ',','.join(bad))
+            print('- Valid values: ',','.join(vals))
+            print('Exiting!')
+            exit()
 
     # =====================================
     # INITIALIZE WHITELIST/BLACKLIST TUPLES
@@ -528,11 +566,18 @@ if __name__ == '__main__':
             print('- Analyze command requires at least one input file.')
             exit()
 
-        print(analyze(
-                    **args.__dict__,
-                    sender_lists=sender_lists,
-                    target_lists=target_lists,
-                ))
+        analyze(**args.__dict__,
+                sender_lists=sender_lists,
+                target_lists=target_lists)
+
+        sess = create_db(args.database_output_file)
+        print(
+            get_output(
+                sess,
+                sender_lists=sender_lists,
+                target_lists=target_lists,
+                color_profile=args.color_profile,
+                columns=args.output_columns))
 
     # Capture and exit
     elif args.cmd == 'capture':
@@ -579,7 +624,8 @@ if __name__ == '__main__':
                     target_lists=target_lists,
                     reverse_resolve=args.reverse_resolve,
                     color_profile=args.color_profile,
-                    arp_resolve=args.arp_resolve))
+                    arp_resolve=args.arp_resolve,
+                    columns=args.output_columns))
     
 
             # Cache packets that will be written to output file

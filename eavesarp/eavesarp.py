@@ -449,11 +449,3 @@ def analyze(database_output_file, sender_lists=None, target_lists=None,
             packets,
             outdb_sess
         )
-
-    return get_output(
-            outdb_sess,
-            sender_lists=sender_lists,
-            target_lists=target_lists,
-            color_profile=color_profile,
-            reverse_resolve=reverse_resolve)
-
