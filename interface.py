@@ -3,6 +3,7 @@
 import argparse
 from eavesarp.eavesarp import *
 from eavesarp.color import ColorProfiles
+from eavesarp.field_builders import *
 import signal
 
 # ===================
@@ -34,6 +35,112 @@ def validate_ipv4(val):
     m = re.match(ipv4_re,val)
     if m: return m
     else: return False
+
+
+def get_output(db_session,order_by=desc,sender_lists=None,
+        target_lists=None,ptr=False,color_profile=None,
+        reverse_resolve=True,arp_resolve=False,col_order=[]):
+    '''Extract transaction records from the database and return
+    them formatted as a table.
+    '''
+
+    if not col_order:
+
+        col_order = [
+            'arp_count',
+            'sender',
+            'target',
+            'target_stale',
+            'sender_ptr',
+            'target_ptr',
+            'mitm_op'
+        ]
+
+    transactions = get_transactions(db_session,order_by)
+
+    if not transactions:
+        output = '- No accepted ARP requests captured\n' \
+        '- If this is unexpected, check your whitelist/blacklist configuration'
+        return output
+
+    # Organize all the records by sender IP
+    rowdict = {}
+    for t in transactions:
+
+        smac = t.sender.mac_address
+
+        sender = t.sender.value
+        target = t.target.value
+
+        if sender_lists and not sender_lists.check(sender):
+            continue
+        if target_lists and not target_lists.check(target):
+            continue
+        
+        # Target count
+        row = [str(t.count)]
+
+        # Flag to determine if the sender is new
+        if sender not in rowdict: new_sender = True
+        else: new_sender = False
+
+        # Include sender only on new instances
+        if new_sender: row += [sender,target]
+        else: row += ['',target]
+
+        row.append(build_target_mac(t))
+        
+        # Reverse name resolution
+        if reverse_resolve:
+
+            sptr,tptr = build_reverse_resolve(t)
+
+            # Show sender ptr only once in column
+            if new_sender: row.append(sptr)
+            else: row.append('')
+
+            # Append the target pointer field
+            row.append(tptr)
+
+            # Append the mitm_op field
+            row.append(build_mitm_op(t))
+
+        row.insert(1,build_stale(t,color_profile))
+
+        if new_sender: rowdict[sender] = [row]
+        else: rowdict[sender].append(row)
+
+    # Restructure dictionary into a list of rows
+    rows = []
+    counter = 0
+
+    for sender,irows in rowdict.items():
+        counter += 1
+
+        # Color odd rows slightly darker
+        if color_profile:
+
+            if counter % 2:
+                rows += [color_profile.style_odd([v for v in r]) for r in irows]
+            else:
+                rows += [color_profile.style_even(r) for r in irows]
+
+        # Just add the rows otherwise
+        else: rows += irows
+
+    # Build the header
+    headers = ['ARP#','S','Sender','Target','Target MAC']
+    #if reverse_resolve: headers += ['Sender PTR','Sender Forward','Target PTR','Target Forward']
+    if reverse_resolve: headers += ['Sender PTR (PTR > FWD)',
+            'Target PTR (PTR > FWD)','Target IP != Forward IP']
+
+    # Color the headers
+    if color_profile: headers = color_profile.style_header(headers)
+
+    # Return the output as a table
+    return tabulate(
+            rows,
+            headers=headers)
 
 # ====================================
 # BUSH LEAGUE: Make arguments reusable
@@ -450,7 +557,29 @@ if __name__ == '__main__':
             to me at the time of original development.
             '''
 
+            dbfile = args.database_output_file
 
+            # Handle new database file. When verbose, alert user that a new
+            # capture must occur prior to printing results.
+            if not Path(dbfile).exists():
+        
+                print(
+                    '- Initializing capture\n- This may take time depending '\
+                    'on network traffic and filter configurations'
+                )
+                sess = create_db(dbfile)
+
+            else:
+
+                print('\x1b[2J\x1b[H')
+                sess = create_db(dbfile)
+                print(get_output(
+                    sess,
+                    sender_lists=sender_lists,
+                    target_lists=target_lists,
+                    reverse_resolve=args.reverse_resolve,
+                    color_profile=args.color_profile,
+                    arp_resolve=args.arp_resolve))
     
 
             # Cache packets that will be written to output file
@@ -459,7 +588,6 @@ if __name__ == '__main__':
             # Loop eternally
             while True:
 
-    
                 result = pool.apply_async(
                     async_sniff,
                     (
@@ -479,13 +607,20 @@ if __name__ == '__main__':
                 # Eternal loop while waiting for the result
                 while not result.ready(): sleep(.2)
     
-                # Clear the screen and print the results
-                print('\x1b[2J\x1b[H')
-                output,packets = result.get()
+                packets = result.get()
 
                 # Capture packets for the output file
-                if args.pcap_output_file: pkts += packets
-                print(output)
+                if args.pcap_output_file and packets: pkts += packets
+
+                # Clear the screen and print the results
+                print('\x1b[2J\x1b[H')
+                print(get_output(
+                    sess,
+                    sender_lists=sender_lists,
+                    target_lists=target_lists,
+                    reverse_resolve=args.reverse_resolve,
+                    color_profile=args.color_profile,
+                    arp_resolve=args.arp_resolve))
     
         except KeyboardInterrupt:
     

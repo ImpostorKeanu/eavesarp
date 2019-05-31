@@ -6,7 +6,7 @@ from emoji import emojize
 class ColorProfile:
 
     def __init__(self,even_color,odd_color,header_color,
-            header_bold=True,target_emoji=None):
+            header_bold=True,stale_emoji=None):
 
         self.even_style = colored.fg(even_color)
         self.odd_style = colored.fg(odd_color)
@@ -14,7 +14,7 @@ class ColorProfile:
         self.header_style = colored.fg(header_color)
         if header_bold: self.header_style += colored.attr('bold')
 
-        self.target_emoji=target_emoji
+        self.stale_emoji=stale_emoji
 
     def style_header(self,headers):
         return self.style_list(headers,self.header_style)
@@ -44,14 +44,14 @@ ColorProfiles = {
     # Novelty color profiles
     'cupcake':ColorProfile(even_color=104, odd_color=164,
         header_color=104, header_bold=True,
-        target_emoji=emojize(':unicorn_face:')),
+        stale_emoji=emojize(':unicorn_face:')),
     'poo':ColorProfile(even_color=136, odd_color=94,
             header_color=136, header_bold=True,
-            target_emoji=emojize(':pile_of_poo:')),
+            stale_emoji=emojize(':pile_of_poo:')),
     'foxhound':ColorProfile(even_color=166, odd_color=179,
             header_color=166, header_bold=True,
-            target_emoji=emojize(':fox_face:')),
+            stale_emoji=emojize(':fox_face:')),
     'rhino':ColorProfile(even_color=254, odd_color=244,
             header_color=254, header_bold=True,
-            target_emoji=emojize(':rhinoceros:'))
+            stale_emoji=emojize(':rhinoceros:'))
 }

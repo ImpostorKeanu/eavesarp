@@ -113,126 +113,12 @@ def unpack_packet(packet):
 
     return unpack_arp(packet.getlayer('ARP'))
 
-def get_output(db_session,order_by=desc,sender_lists=None,
-        target_lists=None,ptr=False,color_profile=None,
-        reverse_resolve=True,arp_resolve=False):
-    '''Extract transaction records from the database and return
-    them formatted as a table.
-    '''
+def get_transactions(db_session,order_by=desc):
 
     # Getting all transaction objects
-    transactions = db_session.query(Transaction) \
+    return db_session.query(Transaction) \
             .order_by(desc(Transaction.count)) \
             .all()
-
-    if not transactions:
-        output = '- No accepted ARP requests captured\n' \
-        '- If this is unexpected, check your whitelist/blacklist configuration'
-        return output
-
-    # Organize all the records by sender IP
-    rowdict = {}
-    for t in transactions:
-
-        smac = t.sender.mac_address
-
-        sender = t.sender.value
-        target = t.target.value
-
-        if sender_lists and not sender_lists.check(sender):
-            continue
-        if target_lists and not target_lists.check(target):
-            continue
-        
-        # Target count
-        row = [str(t.count)]
-
-        # Flag to determine if the sender is new
-        if sender not in rowdict: new_sender = True
-        else: new_sender = False
-
-        # Include sender only on new instances
-        if new_sender: row += [sender,target]
-        else: row += ['',target]
-
-        # Stale IP
-        
-        stale_emoji = 'X'
-        if color_profile and color_profile.target_emoji:
-            stale_emoji = color_profile.target_emoji
-
-        if t.stale_target:
-            row.append('[STALE TARGET]')
-        elif t.target.mac_address:
-            row.append(t.target.mac_address)
-        else: row.append('[UNRESOLVED]')
-        
-        # Reverse name resolution
-        if reverse_resolve:
-
-            sptr,sfwd = '',''
-            tptr,tfwd = '',''
-            mitm_op = False
-
-            if t.sender.ptr:
-                sptr = t.sender.ptr[0].value
-                if t.sender.ptr[0].forward_ip:
-                    sptr = f'{sptr} ({t.sender.ptr[0].forward_ip})'               
-
-            if t.target.ptr:
-                tptr = t.target.ptr[0].value
-                if t.target.ptr[0].forward_ip:
-                    tptr = f'{tptr} ({t.target.ptr[0].forward_ip})'
-
-                if t.stale_target and t.target.ptr[0].forward_ip != t.target.value:
-                    mitm_op = True
-
-            #if new_sender: row += [sptr,sfwd]
-            #else: row += ['','']
-            if new_sender: row.append(sptr)
-            else: row.append('')
-
-            #row += [tptr,tfwd]
-            row.append(tptr)
-            row.append(mitm_op)
-        
-        if t.stale_target: row.insert(1,stale_emoji)
-        else: row.insert(1,'')
-
-        if new_sender: rowdict[sender] = [row]
-        else: rowdict[sender].append(row)
-
-    # Restructure dictionary into a list of rows
-    rows = []
-    counter = 0
-
-    for sender,irows in rowdict.items():
-        counter += 1
-
-        # Color odd rows slightly darker
-        if color_profile:
-
-            if counter % 2:
-                rows += [color_profile.style_odd([v for v in r]) for r in irows]
-            else:
-                rows += [color_profile.style_even(r) for r in irows]
-
-        # Just add the rows otherwise
-        else: rows += irows
-
-    # Build the header
-    headers = ['ARP#','S','Sender','Target','Target MAC']
-    #if reverse_resolve: headers += ['Sender PTR','Sender Forward','Target PTR','Target Forward']
-    if reverse_resolve: headers += ['Sender PTR (PTR > FWD)',
-            'Target PTR (PTR > FWD)','Target IP != Forward IP']
-
-    # Color the headers
-    if color_profile: headers = color_profile.style_header(headers)
-
-    # Return the output as a table
-    return tabulate(
-            rows,
-            headers=headers)
 
 def create_db(dbfile,overwrite=False):
     '''Initialize the database file and return a session
@@ -324,6 +210,7 @@ def get_or_create_ip(ip, db_session, reverse_resolve=False, ptr=None,
             db_session.add(
                 PTR(ip_id=ip.id,value=ptr)
             )
+            db_session.commit()
 
         # Attempt to resolve the PTR address
         elif reverse_resolve:
@@ -337,6 +224,7 @@ def get_or_create_ip(ip, db_session, reverse_resolve=False, ptr=None,
                         value=ptr,
                         forward_ip=forward_ip)
                 )
+                db_session.commit()
 
             ip.reverse_dns_attempted = True
 
@@ -349,7 +237,6 @@ def get_or_create_ip(ip, db_session, reverse_resolve=False, ptr=None,
             ip.arp_resolve_attempted = True
             db_session.commit()
 
-        db_session.commit()
 
     else:
         
@@ -455,31 +342,7 @@ def async_sniff(interface, redraw_frequency, sender_lists,
     forever or until an inordinate number of keyboard interrupts occur.
     '''
 
-    # Handle new database file. When verbose, alert user that a new
-    # capture must occur prior to printing results.
-    if not Path(dbfile).exists():
-
-        if verbose: print(
-            '- Initializing capture\n- This may take time depending '\
-            'on network traffic and filter configurations'
-        )
-        sess = create_db(dbfile)
-
-    # Dump the existing database to stdout prior to sniffing.
-    else:
-        
-        sess = create_db(dbfile)
-        print('\x1b[2J\x1b[H')
-        print(
-            get_output(
-                sess,
-                sender_lists=sender_lists,
-                target_lists=target_lists,
-                reverse_resolve=reverse_resolve,
-                color_profile=color_profile,
-                arp_resolve=arp_resolve
-            )
-        )
+    sess = create_db(dbfile)
 
     # Capture packets
     packets = do_sniff(interface,
@@ -494,14 +357,7 @@ def async_sniff(interface, redraw_frequency, sender_lists,
             interface,
     )
 
-    # output,packets
-    return get_output(
-            sess,
-            sender_lists=sender_lists,
-            target_lists=target_lists,
-            reverse_resolve=reverse_resolve,
-            color_profile=color_profile,
-            arp_resolve=arp_resolve),packets
+    return packets
 
 def analyze(database_output_file, sender_lists=None, target_lists=None,
         analysis_output_file=None, pcap_files=[], sqlite_files=[],
