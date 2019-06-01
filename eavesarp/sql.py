@@ -91,7 +91,7 @@ class Transaction(Base):
     def build_stale(self,color_profile=None,*args,**kwargs):
     
         if not color_profile or not color_profile.stale_emoji:
-            stale_char = 'X'
+            stale_char = 'True'
         else:
             stale_char = color_profile.stale_emoji
     
@@ -100,7 +100,7 @@ class Transaction(Base):
         elif not self.target.arp_resolve_attempted:
             return '[UNCONFIRMED]'
         else:
-            return ''
+            return False
     
     def build_target_mac(self,*args,**kwargs):
     
