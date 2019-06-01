@@ -71,6 +71,7 @@ def arp_request(interface,target,verbose=0,retry=0,timeout=1):
     the MAC address for the target if successful, None otherwise.
     '''
 
+
     results, unanswered = sr(
         ARP(
             op=1,
@@ -86,6 +87,26 @@ def arp_request(interface,target,verbose=0,retry=0,timeout=1):
         return results[0][1].hwsrc
     else:
         return None
+
+def arp_resolve_ips(interface,db_file,verbose=0,retry=0,timeout=1):
+
+    sess = create_db(db_file)
+    to_resolve = sess.query(IP) \
+                    .filter(IP.arp_resolve_attempted != True) \
+                    .all()
+
+    for ip in to_resolve:
+
+        hwaddr = arp_request(interface,ip.value,verbose,retry,timeout)
+
+        if hwaddr:
+            ip.mac_address = hwaddr
+
+        ip.arp_resolve_attempted = True
+
+        sess.commit()
+
+    return None
 
 def validate_packet(packet,unpack=True):
     '''Validate a packet to be of type ARP. Leave unpack to True and
@@ -165,6 +186,24 @@ def reverse_dns_resolve(ip):
 
         return None,None
 
+def reverse_dns_resolve_ips(db_file):
+
+    sess = create_db(db_file)
+    ips = sess.query(IP) \
+        .filter(IP.reverse_dns_attempted != True) \
+        .all()
+
+    for ip in ips:
+        ptr,forward_ip = reverse_dns_resolve(ip.value)
+        if ptr:
+            sess.add(
+                PTR(ip_id=ip.id,
+                    value=ptr,
+                    forward_ip=forward_ip)
+                )
+            ip.reverse_dns_attempted = True
+            sess.commit()
+
 @validate_packet_unpack
 def filter_packet(packet,sender_lists=None,target_lists=None):
     '''Filter an individual packet. This should be executed in the `lambda`
@@ -204,67 +243,9 @@ def get_or_create_ip(ip, db_session, reverse_resolve=False, ptr=None,
         db_session.add(ip)
         db_session.commit()
 
-        # Obtain and set the PTR record for a given IP
-        if ptr:
-
-            db_session.add(
-                PTR(ip_id=ip.id,value=ptr)
-            )
-            db_session.commit()
-
-        # Attempt to resolve the PTR address
-        elif reverse_resolve:
-
-            ptr,forward_ip = reverse_dns_resolve(ip.value)
-
-            if ptr:
-
-                db_session.add(
-                    PTR(ip_id=ip.id,
-                        value=ptr,
-                        forward_ip=forward_ip)
-                )
-                db_session.commit()
-
-            ip.reverse_dns_attempted = True
-
-        # Handle ARP request if active is enabled
-        if arp_resolve and not ip.arp_resolve_attempted:
-
-            hwaddr = arp_request(interface,
-                ip.value)
-            if hwaddr: ip.mac_address = hwaddr
-            ip.arp_resolve_attempted = True
-            db_session.commit()
-
-
     else:
         
         ip = db_ip
-
-        if reverse_resolve and not ip.reverse_dns_attempted:
-
-            ptr,forward_ip = reverse_dns_resolve(ip.value)
-
-            if ptr:
-
-                db_session.add(
-                    PTR(ip_id=ip.id,
-                        value=ptr,
-                        forward_ip=forward_ip)
-                )
-
-            ip.reverse_dns_attempted = True
-            db_session.commit()
-
-        if arp_resolve and not db_ip.mac_address and not ip.arp_resolve_attempted:
-
-            hwaddr = arp_request(interface,
-                ip.value)
-            if hwaddr: ip.mac_address = hwaddr
-            ip.arp_resolve_attempted = True
-
-            db_session.commit()
 
     return ip
 
@@ -317,10 +298,6 @@ def handle_packets(packets,db_session,reverse_resolve=False,
 
             transaction.count += 1
         
-        # Populate stale field in transaction when appropriate
-        if not target.mac_address and target.arp_resolve_attempted:
-            transaction.stale_target = True
-
 
         db_session.commit()
 
@@ -423,7 +400,6 @@ def analyze(database_output_file, sender_lists=None, target_lists=None,
                         sender_ip_id=sender.id,
                         target_ip_id=target.id,
                         count=t.count,
-                        stale_target=t.stale_target
                     )
                 )
 

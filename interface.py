@@ -583,7 +583,7 @@ if __name__ == '__main__':
     elif args.cmd == 'capture':
 
         osigint = signal.signal(signal.SIGINT,signal.SIG_IGN)
-        pool = Pool(1)
+        pool = Pool(3)
         signal.signal(signal.SIGINT, osigint)
     
         try:
@@ -631,42 +631,88 @@ if __name__ == '__main__':
             # Cache packets that will be written to output file
             pkts = []
 
+            sniff_result = None
+            arp_resolve_result, reverse_resolve_result = None, None
+
             # Loop eternally
             while True:
 
-                result = pool.apply_async(
-                    async_sniff,
-                    (
-                        args.interface,
-                        args.redraw_frequency,
-                        sender_lists,
-                        target_lists,
-                        args.database_output_file,
-                        args.analysis_output_file,
-                        args.reverse_resolve,
-                        args.color_profile,
-                        True,
-                        args.arp_resolve
+                # Handle sniff results
+                if sniff_result and sniff_result.ready():
+
+                    pkts = sniff_result.get()
+                    sniff_result = None
+                
+                    # Capture packets for the output file
+                    if args.pcap_output_file and packets: pkts += packets
+    
+                    # Clear the screen and print the results
+                    print('\x1b[2J\x1b[H')
+                    print(get_output(
+                        sess,
+                        sender_lists=sender_lists,
+                        target_lists=target_lists,
+                        reverse_resolve=args.reverse_resolve,
+                        color_profile=args.color_profile,
+                        arp_resolve=args.arp_resolve,
+                        columns=args.output_columns))
+                    
+                # Do sniffing
+                elif not sniff_result:
+                   
+                    sniff_result = pool.apply_async(
+                        async_sniff,
+                        (
+                            args.interface,
+                            args.redraw_frequency,
+                            sender_lists,
+                            target_lists,
+                            args.database_output_file,
+                            args.analysis_output_file,
+                            args.reverse_resolve,
+                            args.color_profile,
+                            True,
+                            args.arp_resolve
+                        )
                     )
-                )
-    
-                # Eternal loop while waiting for the result
-                while not result.ready(): sleep(.2)
-    
-                packets = result.get()
 
-                # Capture packets for the output file
-                if args.pcap_output_file and packets: pkts += packets
+                # Reset resolution results
+                if arp_resolve_result and arp_resolve_result.ready():
+                    arp_resolve_result = None
 
-                # Clear the screen and print the results
-                print('\x1b[2J\x1b[H')
-                print(get_output(
-                    sess,
-                    sender_lists=sender_lists,
-                    target_lists=target_lists,
-                    reverse_resolve=args.reverse_resolve,
-                    color_profile=args.color_profile,
-                    arp_resolve=args.arp_resolve))
+                if reverse_resolve_result and reverse_resolve_result.ready():
+                    reverse_resolve_result = None
+   
+                # Do reverse resolution
+                if args.reverse_resolve and not reverse_resolve_result:
+
+                    to_resolve = sess.query(IP) \
+                            .filter(IP.reverse_dns_attempted != True) \
+                            .count()
+
+                    if to_resolve:
+                        
+                       reverse_resolve_result = pool.apply_async(
+                            reverse_dns_resolve_ips,
+                            (args.database_output_file,)
+                        )
+
+                # Do ARP resolution
+                if args.arp_resolve and not arp_resolve_result:
+
+                    to_resolve = sess.query(IP) \
+                            .filter(IP.arp_resolve_attempted != True) \
+                            .count()
+
+                    if to_resolve:
+
+                        arp_resolve_result = pool.apply_async(
+                            arp_resolve_ips,
+                                (args.interface, args.database_output_file,)
+                            )
+
+            sleep(.2)
+
     
         except KeyboardInterrupt:
     
@@ -701,7 +747,9 @@ if __name__ == '__main__':
             try:
     
                 pool.close()
-                result.wait(5)
+                if sniff_result: sniff_result.wait(5)
+                if reverse_resolve_result: reverse_resolve_result.wait(5)
+                if arp_resolve_result: arp_resolve_result.wait(5)
     
             except KeyboardInterrupt:
     

@@ -66,9 +66,6 @@ class Transaction(Base):
     sender_ip_id = Column(Integer,nullable=False)
     target_ip_id = Column(Integer,nullable=False)
     count = Column(Integer,default=1)
-    stale_target = Column(Boolean, nullable=False, default=False,
-        doc='''Determines if a given target is stale
-        ''')
     sender = relationship('IP',
          back_populates='sender_transactions',
          primaryjoin='and_(Transaction.sender_ip_id==IP.id)')
@@ -79,6 +76,13 @@ class Transaction(Base):
         [sender_ip_id,target_ip_id],
         [IP.id,IP.id],
     )
+
+    def stale_target(self):
+
+        if self.target.arp_resolve_attempted and not self.target.mac_address:
+            return True
+        else:
+            return False
 
     def build_count(self,*args,**kwargs):
 
@@ -91,18 +95,20 @@ class Transaction(Base):
         else:
             stale_char = color_profile.stale_emoji
     
-        if self.stale_target:
+        if self.stale_target():
             return stale_char
+        elif not self.target.arp_resolve_attempted:
+            return '[UNCONFIRMED]'
         else:
             return ''
     
     def build_target_mac(self,*args,**kwargs):
     
-        if self.stale_target:
+        if self.stale_target():
             return '[STALE TARGET]'
         elif self.target.mac_address:
             return self.target.mac_address
-        else:
+        elif not self.target.arp_resolve_attempted:
             return '[UNRESOLVED]'
 
     def build_sender_mac(self,*args,**kwargs):
