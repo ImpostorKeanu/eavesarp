@@ -227,8 +227,8 @@ def filter_packet(packet,sender_lists=None,target_lists=None):
 
     return packet
 
-def get_or_create_ip(ip, db_session, reverse_resolve=False, ptr=None,
-        interface=None, arp_resolve=False, mac=None):
+def get_or_create_ip(value, db_session, ptr=None, mac_address=None,
+        arp_resolve_attempted=False, reverse_dns_attempted=False):
     '''Get or create an IP object from the SQLite database. Also
     handles:
 
@@ -236,35 +236,40 @@ def get_or_create_ip(ip, db_session, reverse_resolve=False, ptr=None,
     - ARP resolution
     '''
 
-    db_ip = db_session.query(IP).filter(IP.value==ip).first()
+    ip = db_session.query(IP).filter(IP.value==value).first()
 
-    if not db_ip:
+    if not ip:
 
-        ip = IP(value=ip,mac_address=mac)
+        ip = IP(value=value,mac_address=mac_address,)
 
-        if mac: ip.arp_resolve_attempted = True
+        if mac_address or arp_resolve_attempted:
+            ip.arp_resolve_attempted = True
+
+        if reverse_dns_attempted:
+            ip.reverse_dns_attempted = True
 
         db_session.add(ip)
         db_session.commit()
 
-    else:
-        
-        ip = db_ip
-
     return ip
 
+def get_or_create_ptr(value,ip_id,db_session,forward_ip=None):
+
+    ptr = db_session.query(PTR).filter(PTR.value==value).first()
+
+    if not ptr:
+
+        ptr = PTR(value=value,ip_id=ip_id,forward_ip=forward_ip)
+
+        db_session.add(ptr)
+        db_session.commit()
+
+    return ptr
+
 @unpack_packets
-def handle_packets(packets,db_session,reverse_resolve=False,
-        arp_resolve=False,interface=None):
+def handle_packets(packets,db_session):
     '''Handle packets capture from the interface.
     '''
-
-    if arp_resolve:
-
-        if not interface:
-            raise Exception(
-                'Active ARP resolution requires an interface ip'
-            )
 
     for packet in packets:
 
@@ -273,14 +278,10 @@ def handle_packets(packets,db_session,reverse_resolve=False,
         # GET/CREATE database objects
         sender = get_or_create_ip(sender,
                 db_session,
-                reverse_resolve,
-                mac=shw)
+                mac_address=shw)
 
         target = get_or_create_ip(target,
-                db_session,
-                reverse_resolve,
-                arp_resolve=arp_resolve,
-                interface=interface)
+                db_session)
 
         # Determine if a transaction record for the 
           # target/sender pair exists
@@ -331,12 +332,7 @@ def async_sniff(interface, redraw_frequency, sender_lists,
             target_lists)
 
     # Handle packets (to the db they go, yo)
-    handle_packets(packets,
-            sess,
-            reverse_resolve,
-            arp_resolve,
-            interface,
-    )
+    handle_packets(packets, sess)
 
     #sess.close()
 
@@ -370,22 +366,35 @@ def analyze(database_output_file, sender_lists=None, target_lists=None,
 
         for t in isess.query(Transaction).all():
 
-            # ===============
-            # HANDLE POINTERS
-            # ===============
 
-            if t.sender.ptr: sptr = t.sender.ptr[0].value
-            else: sptr=None
+            ips = []
+            for handle in ['sender','target']:
 
-            if t.target.ptr: tptr = t.target.ptr[0].value
-            else: tptr=None
+                transaction_ip = tip = t.__getattribute__(handle)
 
-            # =================
-            # HANDLE IP OBJECTS
-            # =================
+                # Create a dictionary of arguments to create the IP
+                kwargs = {
+                    'db_session':outdb_sess,
+                }
+                for attr in ['value','arp_resolve_attempted',
+                    'reverse_dns_attempted', 'mac_address']:
+                    kwargs[attr] = tip.__getattribute__(attr)
+               
+                # Create the new IP
+                ip = get_or_create_ip(**kwargs)
 
-            sender = get_or_create_ip(t.sender.value,outdb_sess,ptr=sptr,mac=t.sender.mac_address)
-            target = get_or_create_ip(t.target.value,outdb_sess,ptr=tptr,mac=t.target.mac_address)
+                # Associate the ptr
+                ptr = tip.ptr[0].value if tip.ptr else None
+                if ptr:
+
+                    get_or_create_ptr(ptr,ip.id,outdb_sess,
+                            tip.ptr[0].forward_ip)
+
+                # Append the ip
+                ips.append(ip)
+
+            # Expand list into sender/target value
+            sender, target = ips
 
             # ======================
             # HANDLE THE TRANSACTION

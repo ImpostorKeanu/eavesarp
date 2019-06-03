@@ -6,6 +6,7 @@ from sqlalchemy import (Column, Integer, String, DateTime, ForeignKey,
 from sqlalchemy.orm import (relationship, backref, sessionmaker,
         close_all_sessions)
 from sqlalchemy.ext.declarative import declarative_base
+import pdb
 
 
 Base = declarative_base()
@@ -59,6 +60,9 @@ class PTR(Base):
 
 class Transaction(Base):
     '''Transaction model.
+
+    Additional methods have been defined to facilitate extraction
+    of data for table columns.
     '''
 
     __tablename__ = 'transaction'
@@ -78,23 +82,32 @@ class Transaction(Base):
     )
 
     def stale_target(self):
+        '''Return True if the target is stale, i.e. arp resolution
+        has been attempted and no MAC address has been set.
+        '''
 
-        if self.target.arp_resolve_attempted and not self.target.mac_address:
+        if self.target.arp_resolve_attempted and \
+                not self.target.mac_address:
             return True
         else:
             return False
 
     def build_count(self,*args,**kwargs):
+        '''Return the count of ARP requests as a string value.
+        '''
 
         return str(self.count)
 
     def build_stale(self,color_profile=None,*args,**kwargs):
+        '''Build the value for the stale column. The character
+        returned will be derived from the color_profile value.
+        '''
     
         if not color_profile or not color_profile.stale_emoji:
-            stale_char = 'True'
+            stale_char = True
         else:
             stale_char = color_profile.stale_emoji
-    
+
         if self.stale_target():
             return stale_char
         elif not self.target.arp_resolve_attempted:
@@ -103,6 +116,13 @@ class Transaction(Base):
             return False
     
     def build_target_mac(self,*args,**kwargs):
+        '''Return the MAC address for the target:
+
+        - [STALE TARGET] - returned when the target is stale
+        - [UNRESOLVED] - indicates that no MAC is available 
+        and ARP resolution has not been attempted.
+        - MAC ADDRESS - when a MAC value is available for the IP
+        '''
     
         if self.stale_target():
             return '[STALE TARGET]'
@@ -112,32 +132,40 @@ class Transaction(Base):
             return '[UNRESOLVED]'
 
     def build_sender_mac(self,*args,**kwargs):
+        '''Return the MAC address for the sender of the
+        transaction. Guaranteed to exist since it is associated
+        with the sender itself.
+        '''
 
         return self.sender.mac_address
-    
-    def build_reverse_resolve(self,*args,**kwargs):
-        '''Build the DNS reverse resolution fields for the
-        Sender PTR, Target PTR, and Target IP != Forward IP
-        columns.
-    
-        returns a tuple: (sender_pointer,target_pointer,)
-        '''
-    
-        sptr = self.build_ptr_string(self.sender)
-        tptr = self.build_ptr_string(self.target)
-        
-        return sptr,tptr
 
     def build_sender_ptr(self,*args,new_sender=False,**kwargs):
+        '''Return the PTR value for the sender if available.
+        '''
 
-        if new_sender:
-            return self.build_ptr_string(self.sender)
-        else:
-            return ''
+        sptr = self.sender.ptr[0].value if self.sender.ptr \
+                and new_sender else ''
+
+        return sptr
 
     def build_target_ptr(self,*args,**kwargs):
+        '''Return the PTR value for the target if available.
+        '''
 
-        return self.build_ptr_string(self.target)
+        tptr = self.target.ptr[0].value if self.target.ptr else ''
+
+        return tptr
+
+    def build_target_forward(self,*args,**kwargs):
+        '''Build the forward IP address for the PTR value of
+        a given target address. This is useful when determining
+        if a given target may have a MITM opportunity when the
+        target address is stale.
+        '''
+
+        tptr = self.target.ptr[0] if self.target.ptr else None
+
+        return tptr.forward_ip if tptr and tptr.forward_ip else ''
     
     def build_mitm_op(self,*args,**kwargs):
         '''Check the target of a transaction to determine
@@ -149,23 +177,14 @@ class Transaction(Base):
         if self.target.ptr:
     
             if self.target.ptr[0].forward_ip != self.target.value:
-                return True
+                return f'True (T:{self.target.value} != ' \
+                       f'P:{self.target.ptr[0].forward_ip})'
         
         return False
-    
-    def build_ptr_string(self,ip,*args,**kwargs):
-    
-        if ip.ptr:
-            ptr = ip.ptr[0].value
-            fwd = ip.ptr[0].forward_ip
-            if fwd:
-                return f'{ptr} ({fwd})'
-            else:
-                return ptr
-        
-        return ''
 
     def build_from_handle(self,handle,*args,**kwargs):
+        '''Build a column value from attribute name.
+        '''
 
         return self.__getattribute__(handle)(*args,**kwargs)
 

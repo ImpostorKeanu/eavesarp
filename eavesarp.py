@@ -1,17 +1,16 @@
 #!/usr/bin/env python3
 
 import argparse
-from eavesarp.eavesarp import *
-from eavesarp.color import ColorProfiles
+from Eavesarp.eavesarp import *
+from Eavesarp.color import ColorProfiles
+from Eavesarp.decorators import *
+from Eavesarp.validators import *
 from sys import exit
 import signal
 
 # ===================
 # CONSTANTS/FUNCTIONS
 # ===================
-
-# Regexp to validate ipv4 structure
-ipv4_re = re.compile('^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$')
 
 COL_MAP = {
     'arp_count':'ARP#',
@@ -20,8 +19,9 @@ COL_MAP = {
     'target':'Target',
     'target_mac':'Target MAC',
     'stale':'Stale',
-    'sender_ptr':'Sender PTR (PTR > FWD)',
-    'target_ptr':'Target PTR (PTR > FWD)',
+    'sender_ptr':'Sender PTR',
+    'target_ptr':'Target PTR',
+    'target_forward':'Target PTR Forward',
     'mitm_op':'Target IP != Forward IP'
 }
 
@@ -44,16 +44,6 @@ def ipv4_from_file(infile):
             else: continue
     
     return addrs
-
-def validate_ipv4(val):
-    '''Verify if a given value matches the pattern of an
-    IPv4 address.
-    '''
-
-    m = re.match(ipv4_re,val)
-    if m: return m
-    else: return False
-
 
 def get_output(db_session,order_by=desc,sender_lists=None,
         target_lists=None,ptr=False,color_profile=None,
@@ -465,7 +455,7 @@ if __name__ == '__main__':
 
                 if not Path(ival).exists():
                     print(
-                        f'Inivalid ipv4 address and unknown file, skipping: {line}'
+                        f'Invalid ipv4 address and unknown file, skipping: {ival}'
                     )
                 else: vals += ipv4_from_file(ival)
 
@@ -634,8 +624,7 @@ if __name__ == '__main__':
                     color_profile=args.color_profile,
                     arp_resolve=args.arp_resolve,
                     columns=args.output_columns)
-                print('\x1b[2J\x1b[H')
-                print(output)
+                print('\x1b[2J\x1b[H'+output)
     
             # Cache packets that will be written to output file
             pkts = []
@@ -664,8 +653,7 @@ if __name__ == '__main__':
                         arp_resolve=args.arp_resolve,
                         columns=args.output_columns)
                     # Clear the screen and print the results
-                    print('\x1b[2J\x1b[H')
-                    print(output)
+                    print('\x1b[2J\x1b[H'+output)
                     
                 # Do sniffing
                 elif not sniff_result:
