@@ -106,6 +106,8 @@ def arp_resolve_ips(interface,db_file,verbose=0,retry=0,timeout=1):
 
         sess.commit()
 
+    sess.close()
+
     return None
 
 def validate_packet(packet,unpack=True):
@@ -203,6 +205,8 @@ def reverse_dns_resolve_ips(db_file):
                 )
             ip.reverse_dns_attempted = True
             sess.commit()
+
+    sess.close()
 
 @validate_packet_unpack
 def filter_packet(packet,sender_lists=None,target_lists=None):
@@ -334,6 +338,8 @@ def async_sniff(interface, redraw_frequency, sender_lists,
             interface,
     )
 
+    #sess.close()
+
     return packets
 
 def analyze(database_output_file, sender_lists=None, target_lists=None,
@@ -425,3 +431,5 @@ def analyze(database_output_file, sender_lists=None, target_lists=None,
             packets,
             outdb_sess
         )
+
+    outdb_sess.close()

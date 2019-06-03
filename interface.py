@@ -26,13 +26,9 @@ COL_MAP = {
 }
 
 COL_ORDER = [
-    'arp_count',
     'sender',
     'target',
-    'stale',
-    'sender_ptr',
-    'target_ptr',
-    'mitm_op'
+    'arp_count',
 ]
 
 @validate_file_presence
@@ -72,6 +68,19 @@ def get_output(db_session,order_by=desc,sender_lists=None,
         output = '- No accepted ARP requests captured\n' \
         '- If this is unexpected, check your whitelist/blacklist configuration'
         return output
+
+    # =====================================================
+    # ADD PTR/STALE COLUMNS WHEN ARP/DNS RESOLVE IS ENABLED
+    # =====================================================
+
+    if arp_resolve and not 'stale' in columns:
+        columns.append('stale')
+
+    if reverse_resolve:
+        if not 'sender_ptr' in columns:
+            columns.append('sender_ptr')
+        if not 'target_ptr' in columns:
+            columns.append('target_ptr')
 
     # Organize all the records by sender IP
     rowdict = {}
@@ -616,18 +625,18 @@ if __name__ == '__main__':
 
             else:
 
-                print('\x1b[2J\x1b[H')
                 sess = create_db(dbfile)
-                print(get_output(
+                output = get_output(
                     sess,
                     sender_lists=sender_lists,
                     target_lists=target_lists,
                     reverse_resolve=args.reverse_resolve,
                     color_profile=args.color_profile,
                     arp_resolve=args.arp_resolve,
-                    columns=args.output_columns))
+                    columns=args.output_columns)
+                print('\x1b[2J\x1b[H')
+                print(output)
     
-
             # Cache packets that will be written to output file
             pkts = []
 
@@ -646,16 +655,17 @@ if __name__ == '__main__':
                     # Capture packets for the output file
                     if args.pcap_output_file and packets: pkts += packets
     
-                    # Clear the screen and print the results
-                    print('\x1b[2J\x1b[H')
-                    print(get_output(
+                    output = get_output(
                         sess,
                         sender_lists=sender_lists,
                         target_lists=target_lists,
                         reverse_resolve=args.reverse_resolve,
                         color_profile=args.color_profile,
                         arp_resolve=args.arp_resolve,
-                        columns=args.output_columns))
+                        columns=args.output_columns)
+                    # Clear the screen and print the results
+                    print('\x1b[2J\x1b[H')
+                    print(output)
                     
                 # Do sniffing
                 elif not sniff_result:
@@ -718,6 +728,7 @@ if __name__ == '__main__':
     
             print('\n- CTRL^C Caught...')
             print('- Killing sniffer process and exiting')
+            sess.close()
     
         finally:
     
@@ -728,7 +739,7 @@ if __name__ == '__main__':
             if args.pcap_output_file: wrpcap(args.pcap_output_file,pkts)
             if args.analysis_output_file:
 
-                sess = create_db(args.database_output_file)
+                outdb_sess = create_db(args.database_output_file)
 
                 with open(args.analysis_output_file,'w') as outfile:
 
@@ -739,6 +750,8 @@ if __name__ == '__main__':
                             target_lists=target_lists,
                         )+'\n'
                     )
+
+                outdb_sess.close()
     
             # =========================
             # CLOSE THE SNIFFER PROCESS
