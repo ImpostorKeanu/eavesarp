@@ -6,8 +6,8 @@ from sqlalchemy import (Column, Integer, String, DateTime, ForeignKey,
 from sqlalchemy.orm import (relationship, backref, sessionmaker,
         close_all_sessions)
 from sqlalchemy.ext.declarative import declarative_base
-import pdb
-
+from pathlib import Path
+from os import remove
 
 Base = declarative_base()
 class IP(Base):
@@ -198,3 +198,70 @@ class Transaction(Base):
         return self.__getattribute__(handle)(*args,**kwargs)
 
     bfh = build_from_handle
+
+def create_db(dbfile,overwrite=False):
+    '''Initialize the database file and return a session
+    object.
+    '''
+
+    engine = create_engine(f'sqlite:///{dbfile}')
+    Session = sessionmaker()
+    Session.configure(bind=engine)
+
+    pth = Path(dbfile)
+
+    # Remove the file if specified
+    if pth.exists() and overwrite:
+        remove(pth)
+
+    # Don't clobber pre-existing database files
+    if not Path(dbfile).exists() or overwrite:
+        Base.metadata.create_all(engine)
+
+    return Session()
+
+def get_transactions(db_session,order_by=desc):
+
+    # Getting all transaction objects
+    return db_session.query(Transaction) \
+            .order_by(desc(Transaction.count)) \
+            .all()
+
+def get_or_create_ip(value, db_session, ptr=None, mac_address=None,
+        arp_resolve_attempted=False, reverse_dns_attempted=False):
+    '''Get or create an IP object from the SQLite database. Also
+    handles:
+
+    - Reverse Name Resolution
+    - ARP resolution
+    '''
+
+    ip = db_session.query(IP).filter(IP.value==value).first()
+
+    if not ip:
+
+        ip = IP(value=value,mac_address=mac_address,)
+
+        if mac_address or arp_resolve_attempted:
+            ip.arp_resolve_attempted = True
+
+        if reverse_dns_attempted:
+            ip.reverse_dns_attempted = True
+
+        db_session.add(ip)
+        db_session.commit()
+
+    return ip
+
+def get_or_create_ptr(value,ip_id,db_session,forward_ip=None):
+
+    ptr = db_session.query(PTR).filter(PTR.value==value).first()
+
+    if not ptr:
+
+        ptr = PTR(value=value,ip_id=ip_id,forward_ip=forward_ip)
+
+        db_session.add(ptr)
+        db_session.commit()
+
+    return ptr

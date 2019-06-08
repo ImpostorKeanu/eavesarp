@@ -9,6 +9,7 @@ from Eavesarp.eavesarp import *
 from Eavesarp.color import ColorProfiles
 from Eavesarp.decorators import *
 from Eavesarp.validators import *
+from Eavesarp.resolve import *
 from Eavesarp.lists import *
 from sys import exit,stdout
 # ===================
@@ -642,7 +643,6 @@ if __name__ == '__main__':
                         target_lists=target_lists
                     ).read()
                 )
-
 
     # Capture and exit
     elif args.cmd == 'capture':
