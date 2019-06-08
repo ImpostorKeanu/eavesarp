@@ -302,7 +302,6 @@ def handle_packets(packets,db_session):
         else:
 
             transaction.count += 1
-        
 
         db_session.commit()
 
@@ -316,8 +315,7 @@ def do_sniff(interfaces,redraw_frequency,sender_lists,target_lists):
     )
    
 def async_sniff(interface, redraw_frequency, sender_lists,
-        target_lists, dbfile, analysis_output_file=None, reverse_resolve=False, 
-        color_profile=None, verbose=False, arp_resolve=False):
+        target_lists, dbfile):
     '''This function should be started in a distinct process, allowing
     the one to CTRL^C during execution and gracefully exit the sniffer.
     Not starting the sniffer in a distinct process results in it blocking
@@ -334,13 +332,13 @@ def async_sniff(interface, redraw_frequency, sender_lists,
     # Handle packets (to the db they go, yo)
     handle_packets(packets, sess)
 
-    #sess.close()
+    sess.close()
 
     return packets
 
 def analyze(database_output_file, sender_lists=None, target_lists=None,
         analysis_output_file=None, pcap_files=[], sqlite_files=[],
-        color_profile=None, reverse_resolve=True, *args, **kwargs):
+        color_profile=None, dns_resolve=True, *args, **kwargs):
     '''Create a new database and populate it with records stored in
     each type of input file.
     '''
@@ -365,7 +363,6 @@ def analyze(database_output_file, sender_lists=None, target_lists=None,
         # ====================================================
 
         for t in isess.query(Transaction).all():
-
 
             ips = []
             for handle in ['sender','target']:

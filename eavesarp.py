@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 
 import argparse
+import signal
+import pdb
+import csv
+from io import StringIO
 from Eavesarp.eavesarp import *
 from Eavesarp.color import ColorProfiles
 from Eavesarp.decorators import *
 from Eavesarp.validators import *
-from sys import exit
-import signal
-
+from Eavesarp.lists import *
+from sys import exit,stdout
 # ===================
 # CONSTANTS/FUNCTIONS
 # ===================
@@ -31,6 +34,7 @@ COL_ORDER = [
     'arp_count',
 ]
 
+
 @validate_file_presence
 def ipv4_from_file(infile):
 
@@ -45,12 +49,55 @@ def ipv4_from_file(infile):
     
     return addrs
 
-def get_output(db_session,order_by=desc,sender_lists=None,
-        target_lists=None,ptr=False,color_profile=None,
-        reverse_resolve=True,arp_resolve=False,columns=COL_ORDER):
+def get_output_csv(db_session,order_by=desc,sender_lists=None,
+        target_lists=None):
+
+    # ==========================
+    # HANDLE SENDER/TARGET LISTS
+    # ==========================
+    
+    sender_lists = sender_lists or Lists()
+    target_lists = target_lists or Lists()
+
+    # ===============
+    # PREPARE COLUMNS
+    # ===============
+
+    columns = list(COL_MAP.keys())
+
+    # ====================
+    # GET ALL TRANSACTIONS
+    # ====================
+
+    transactions = get_transactions(db_session,order_by)
+
+    # =============================
+    # WRITE CSVS TO STRINGIO OBJECT
+    # =============================
+
+    outfile = StringIO()
+    writer = csv.writer(outfile)
+    writer.writerow(columns)
+
+    # Write all transactions
+    for t in transactions:
+        writer.writerow([t.bfh('build_'+col) for col in columns])
+
+    outfile.seek(0)
+
+    # Return the output
+    return outfile
+
+
+def get_output_table(db_session,order_by=desc,sender_lists=None,
+        target_lists=None,color_profile=None,dns_resolve=True,
+        arp_resolve=False,columns=COL_ORDER):
     '''Extract transaction records from the database and return
     them formatted as a table.
     '''
+
+    sender_lists = sender_lists or Lists()
+    target_lists = target_lists or Lists()
 
     transactions = get_transactions(db_session,order_by)
 
@@ -66,11 +113,13 @@ def get_output(db_session,order_by=desc,sender_lists=None,
     if arp_resolve and not 'stale' in columns:
         columns.append('stale')
 
-    if reverse_resolve:
+    if dns_resolve:
         if not 'sender_ptr' in columns:
             columns.append('sender_ptr')
         if not 'target_ptr' in columns:
             columns.append('target_ptr')
+        if not 'mitm_op' in columns:
+            columns.append('mitm_op')
 
     # Organize all the records by sender IP
     rowdict = {}
@@ -81,9 +130,11 @@ def get_output(db_session,order_by=desc,sender_lists=None,
         sender = t.sender.value
         target = t.target.value
 
-        if sender_lists and not sender_lists.check(sender):
-            continue
-        if target_lists and not target_lists.check(target):
+        # ====================
+        # FILTER BY IP ADDRESS
+        # ====================
+
+        if not filter_lists(sender_lists,target_lists,sender,target):
             continue
 
         # Flag to determine if the sender is new
@@ -218,6 +269,12 @@ analysis_output_file = Argument('--analysis-output-file','-aof',
     '''
 )
 
+csv_output_file = Argument('--csv-output-file','-cof',
+    default='',
+    help='''Name of file to receive CSV output.
+    '''
+)
+
 output_columns = Argument('--output-columns','-oc',
     default=COL_ORDER,
     nargs='+',
@@ -227,9 +284,9 @@ output_columns = Argument('--output-columns','-oc',
     ''')
 
 # Reverse DNS Configuration
-reverse_resolve = Argument('--reverse-resolve','-rr',
+dns_resolve = Argument('--dns-resolve','-dr',
     action='store_true',
-    help='''Disable reverse resolution of IP addresses.
+    help='''Enable active DNS resolution.
     ''')
 
 color_profile = Argument('--color-profile','-cp',
@@ -265,10 +322,9 @@ if __name__ == '__main__':
         'General Configuration Parameters'
     )
 
-    reverse_resolve.add(general_group)
+    dns_resolve.add(general_group)
     color_profile.add(general_group)
     output_columns.add(general_group)
-
 
     # INPUT FILES
     input_group = analyze_parser.add_argument_group(
@@ -293,6 +349,7 @@ if __name__ == '__main__':
     aog.add_argument('--database-output-file','-dbo',
         default='eavesarp_dump.db',
         help='File to receive aggregated output')
+    csv_output_file.add(aog)
 
     # WHITELISTS
     awfg = aw_filter_group = analyze_parser.add_argument_group(
@@ -344,7 +401,7 @@ if __name__ == '__main__':
 
     color_profile.add(general_group)
 
-    reverse_resolve.add(general_group)
+    dns_resolve.add(general_group)
     
     general_group.add_argument('--arp-resolve','-ar',
         action='store_true',
@@ -360,9 +417,6 @@ if __name__ == '__main__':
         'Output Configuration Parameters'
     )
     database_output_file.add(output_group)
-
-    # Analysis output file
-    analysis_output_file.add(output_group)
 
     # PCAP output file
     output_group.add_argument('--pcap-output-file','-pof',
@@ -571,12 +625,24 @@ if __name__ == '__main__':
 
         sess = create_db(args.database_output_file)
         print(
-            get_output(
+            get_output_table(
                 sess,
                 sender_lists=sender_lists,
                 target_lists=target_lists,
                 color_profile=args.color_profile,
                 columns=args.output_columns))
+
+        if args.csv_output_file:
+            print(f'- Writing csv output to {args.csv_output_file}')
+            with open(args.csv_output_file,'w') as outfile:
+                outfile.write(
+                    get_output_csv(
+                        sess,
+                        sender_lists=sender_lists,
+                        target_lists=target_lists
+                    ).read()
+                )
+
 
     # Capture and exit
     elif args.cmd == 'capture':
@@ -616,11 +682,11 @@ if __name__ == '__main__':
             else:
 
                 sess = create_db(dbfile)
-                output = get_output(
+                output = get_output_table(
                     sess,
                     sender_lists=sender_lists,
                     target_lists=target_lists,
-                    reverse_resolve=args.reverse_resolve,
+                    dns_resolve=args.dns_resolve,
                     color_profile=args.color_profile,
                     arp_resolve=args.arp_resolve,
                     columns=args.output_columns)
@@ -630,7 +696,7 @@ if __name__ == '__main__':
             pkts = []
 
             sniff_result = None
-            arp_resolve_result, reverse_resolve_result = None, None
+            arp_resolve_result, dns_resolve_result = None, None
 
             # Loop eternally
             while True:
@@ -644,11 +710,11 @@ if __name__ == '__main__':
                     # Capture packets for the output file
                     if args.pcap_output_file and packets: pkts += packets
     
-                    output = get_output(
+                    output = get_output_table(
                         sess,
                         sender_lists=sender_lists,
                         target_lists=target_lists,
-                        reverse_resolve=args.reverse_resolve,
+                        dns_resolve=args.dns_resolve,
                         color_profile=args.color_profile,
                         arp_resolve=args.arp_resolve,
                         columns=args.output_columns)
@@ -666,23 +732,16 @@ if __name__ == '__main__':
                             sender_lists,
                             target_lists,
                             args.database_output_file,
-                            args.analysis_output_file,
-                            args.reverse_resolve,
-                            args.color_profile,
-                            True,
-                            args.arp_resolve
                         )
                     )
 
-                # Reset resolution results
-                if arp_resolve_result and arp_resolve_result.ready():
-                    arp_resolve_result = None
 
-                if reverse_resolve_result and reverse_resolve_result.ready():
-                    reverse_resolve_result = None
+                # Reset dns resolution results
+                if dns_resolve_result and dns_resolve_result.ready():
+                    dns_resolve_result = None
    
                 # Do reverse resolution
-                if args.reverse_resolve and not reverse_resolve_result:
+                if args.dns_resolve and not dns_resolve_result:
 
                     to_resolve = sess.query(IP) \
                             .filter(IP.reverse_dns_attempted != True) \
@@ -690,10 +749,14 @@ if __name__ == '__main__':
 
                     if to_resolve:
                         
-                       reverse_resolve_result = pool.apply_async(
+                       dns_resolve_result = pool.apply_async(
                             reverse_dns_resolve_ips,
                             (args.database_output_file,)
                         )
+
+                # Reset arp resolution results
+                if arp_resolve_result and arp_resolve_result.ready():
+                    arp_resolve_result = None
 
                 # Do ARP resolution
                 if args.arp_resolve and not arp_resolve_result:
@@ -725,21 +788,6 @@ if __name__ == '__main__':
             # ===================
     
             if args.pcap_output_file: wrpcap(args.pcap_output_file,pkts)
-            if args.analysis_output_file:
-
-                outdb_sess = create_db(args.database_output_file)
-
-                with open(args.analysis_output_file,'w') as outfile:
-
-                    outfile.write(
-                        get_output(
-                            sess,
-                            sender_lists=sender_lists,
-                            target_lists=target_lists,
-                        )+'\n'
-                    )
-
-                outdb_sess.close()
     
             # =========================
             # CLOSE THE SNIFFER PROCESS
@@ -749,7 +797,7 @@ if __name__ == '__main__':
     
                 pool.close()
                 if sniff_result: sniff_result.wait(5)
-                if reverse_resolve_result: reverse_resolve_result.wait(5)
+                if dns_resolve_result: dns_resolve_result.wait(5)
                 if arp_resolve_result: arp_resolve_result.wait(5)
     
             except KeyboardInterrupt:

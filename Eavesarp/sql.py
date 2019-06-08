@@ -81,6 +81,12 @@ class Transaction(Base):
         [IP.id,IP.id],
     )
 
+    def build_target(self):
+        return self.target.value
+
+    def build_sender(self):
+        return self.sender.value
+
     def stale_target(self):
         '''Return True if the target is stale, i.e. arp resolution
         has been attempted and no MAC address has been set.
@@ -97,6 +103,9 @@ class Transaction(Base):
         '''
 
         return str(self.count)
+
+    def build_arp_count(self,*args,**kwargs):
+        return self.build_count(*args,**kwargs)
 
     def build_stale(self,color_profile=None,*args,**kwargs):
         '''Build the value for the stale column. The character
