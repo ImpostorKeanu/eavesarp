@@ -735,50 +735,49 @@ if __name__ == '__main__':
                         )
                     )
 
-
-                # Reset dns resolution results
-                if dns_resolve_result and dns_resolve_result.ready():
-                    dns_resolve_result = None
+                # ==================
+                # DNS/ARP RESOLUTION
+                # ==================
    
                 # Do reverse resolution
-                if args.dns_resolve and not dns_resolve_result:
+                if args.dns_resolve:
 
-                    to_resolve = sess.query(IP) \
-                            .filter(IP.reverse_dns_attempted != True) \
-                            .count()
+                    # Reset dns resolution results
+                    if not dns_resolve_result or dns_resolve_result.ready():
 
-                    if to_resolve:
-                        
-                       dns_resolve_result = pool.apply_async(
-                            reverse_dns_resolve_ips,
-                            (args.database_output_file,)
-                        )
-
-                # Reset arp resolution results
-                if arp_resolve_result and arp_resolve_result.ready():
-                    arp_resolve_result = None
-
-                # Do ARP resolution
-                if args.arp_resolve and not arp_resolve_result:
-
-                    to_resolve = sess.query(IP) \
-                            .filter(IP.arp_resolve_attempted != True) \
-                            .count()
-
-                    if to_resolve:
-
-                        arp_resolve_result = pool.apply_async(
-                            arp_resolve_ips,
-                                (args.interface, args.database_output_file,)
+                        to_resolve = sess.query(IP) \
+                                .filter(IP.reverse_dns_attempted != True) \
+                                .count()
+    
+                        if to_resolve:
+                            
+                           dns_resolve_result = pool.apply_async(
+                                reverse_dns_resolve_ips,
+                                (args.database_output_file,)
                             )
+    
+                # Do ARP resolution
+                if args.arp_resolve:
 
-            sleep(.2)
+                    if not arp_resolve_result or arp_resolve_result.ready():
+
+                        to_resolve = sess.query(IP) \
+                                .filter(IP.arp_resolve_attempted != True) \
+                                .count()
+    
+                        if to_resolve:
+    
+                            arp_resolve_result = pool.apply_async(
+                                arp_resolve_ips,
+                                    (args.interface, args.database_output_file,)
+                                )
+
+                sleep(.2)
 
     
         except KeyboardInterrupt:
     
             print('\n- CTRL^C Caught...')
-            print('- Killing sniffer process and exiting')
             sess.close()
     
         finally:
@@ -789,16 +788,28 @@ if __name__ == '__main__':
     
             if args.pcap_output_file: wrpcap(args.pcap_output_file,pkts)
     
-            # =========================
-            # CLOSE THE SNIFFER PROCESS
-            # =========================
+            # =====================
+            # CLOSE CHILD PROCESSES
+            # =====================
     
             try:
     
                 pool.close()
-                if sniff_result: sniff_result.wait(5)
-                if dns_resolve_result: dns_resolve_result.wait(5)
-                if arp_resolve_result: arp_resolve_result.wait(5)
+
+                if sniff_result:
+                    print('- Waiting for the sniffer process...',end='')
+                    sniff_result.wait(5)
+                    print('done')
+
+                if dns_resolve_result:
+                    print('- Waiting for the DNS resolver process...',end='')
+                    dns_resolve_result.wait(5)
+                    print('done')
+
+                if arp_resolve_result:
+                    print('- Waiting for the ARP resolver ocess...',end='')
+                    arp_resolve_result.wait(5)
+                    print('done')
     
             except KeyboardInterrupt:
     
