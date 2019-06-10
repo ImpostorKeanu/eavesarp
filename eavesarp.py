@@ -111,10 +111,11 @@ def get_output_table(db_session,order_by=desc,sender_lists=None,
     # ADD PTR/STALE COLUMNS WHEN ARP/DNS RESOLVE IS ENABLED
     # =====================================================
 
-    if arp_resolve and not 'stale' in columns:
+    if arp_resolve and not 'stale' in columns \
+            and columns == COL_ORDER:
         columns.append('stale')
 
-    if dns_resolve:
+    if dns_resolve and columns == COL_ORDER:
         if not 'sender_ptr' in columns:
             columns.append('sender_ptr')
         if not 'target_ptr' in columns:

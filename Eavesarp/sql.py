@@ -251,6 +251,11 @@ def get_or_create_ip(value, db_session, ptr=None, mac_address=None,
         db_session.add(ip)
         db_session.commit()
 
+    elif ip and mac_address and ip.mac_address != mac_address:
+
+        ip.mac_address = mac_address
+        db_session.commit()
+
     return ip
 
 def get_or_create_ptr(value,ip_id,db_session,forward_ip=None):
