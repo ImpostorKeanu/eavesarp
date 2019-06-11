@@ -704,7 +704,6 @@ if __name__ == '__main__':
     
             # Cache packets that will be written to output file
             pkts = []
-
             sniff_result = None
             arp_resolve_result, dns_resolve_result = None, None
 
