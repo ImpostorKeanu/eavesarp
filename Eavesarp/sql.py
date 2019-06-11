@@ -81,13 +81,13 @@ class Transaction(Base):
         [IP.id,IP.id],
     )
 
-    def build_target(self):
+    def build_target(self,*args,**kwargs):
         return self.target.value
 
-    def build_sender(self):
+    def build_sender(self,*args,**kwargs):
         return self.sender.value
 
-    def stale_target(self):
+    def stale_target(self,display_false=True,*args,**kwargs):
         '''Return True if the target is stale, i.e. arp resolution
         has been attempted and no MAC address has been set.
         '''
@@ -96,7 +96,10 @@ class Transaction(Base):
                 not self.target.mac_address:
             return True
         else:
-            return False
+            if display_false:
+                return False
+            else:
+                return ''
 
     def build_count(self,*args,**kwargs):
         '''Return the count of ARP requests as a string value.
@@ -107,7 +110,8 @@ class Transaction(Base):
     def build_arp_count(self,*args,**kwargs):
         return self.build_count(*args,**kwargs)
 
-    def build_stale(self,color_profile=None,*args,**kwargs):
+    def build_stale(self,color_profile=None,display_false=True,
+            *args,**kwargs):
         '''Build the value for the stale column. The character
         returned will be derived from the color_profile value.
         '''
@@ -122,7 +126,10 @@ class Transaction(Base):
         elif not self.target.arp_resolve_attempted:
             return '[UNCONFIRMED]'
         else:
-            return False
+            if display_false:
+                return False
+            else:
+                return ''
     
     def build_target_mac(self,*args,**kwargs):
         '''Return the MAC address for the target:
@@ -176,7 +183,7 @@ class Transaction(Base):
 
         return tptr.forward_ip if tptr and tptr.forward_ip else ''
     
-    def build_mitm_op(self,*args,**kwargs):
+    def build_mitm_op(self,display_false=True,*args,**kwargs):
         '''Check the target of a transaction to determine
         if a potential MITM opportunity exists when a new
         forward address is available for a previous PTR
@@ -189,7 +196,10 @@ class Transaction(Base):
                 return f'True (T:{self.target.value} != ' \
                        f'P:{self.target.ptr[0].forward_ip})'
         
-        return False
+        if display_false:
+            return False
+        else:
+            return ''
 
     def build_from_handle(self,handle,*args,**kwargs):
         '''Build a column value from attribute name.

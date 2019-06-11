@@ -12,6 +12,8 @@ from Eavesarp.validators import *
 from Eavesarp.resolve import *
 from Eavesarp.lists import *
 from sys import exit,stdout
+from io import StringIO
+import pdb
 # ===================
 # CONSTANTS/FUNCTIONS
 # ===================
@@ -26,7 +28,7 @@ COL_MAP = {
     'sender_ptr':'Sender PTR',
     'target_ptr':'Target PTR',
     'target_forward':'Target PTR Forward',
-    'mitm_op':'Target IP != Forward IP'
+    'mitm_op':'MITM'
 }
 
 COL_ORDER = [
@@ -89,10 +91,9 @@ def get_output_csv(db_session,order_by=desc,sender_lists=None,
     # Return the output
     return outfile
 
-
 def get_output_table(db_session,order_by=desc,sender_lists=None,
         target_lists=None,color_profile=None,dns_resolve=True,
-        arp_resolve=False,columns=COL_ORDER):
+        arp_resolve=False,columns=COL_ORDER,display_false=False):
     '''Extract transaction records from the database and return
     them formatted as a table.
     '''
@@ -158,14 +159,16 @@ def get_output_table(db_session,order_by=desc,sender_lists=None,
 
             elif col == 'stale':
 
-                row.append(t.build_stale(color_profile))
+                row.append(t.build_stale(color_profile,
+                    display_false=display_false))
 
             else:
 
                 if col == 'arp_count': col = 'count'
 
                 row.append(
-                    t.bfh('build_'+col,new_sender=new_sender)
+                    t.bfh('build_'+col,new_sender=new_sender,
+                        display_false=display_false)
                 )
 
         if new_sender: rowdict[sender] = [row]
@@ -399,6 +402,11 @@ if __name__ == '__main__':
         type=int,
         help='''Redraw the screen after each N packets
         are sniffed from the interface.
+        ''')
+
+    general_group.add_argument('--display-false','-ds',
+        action='store_true',
+        help='''Enables display of false values in output columns.
         ''')
 
     color_profile.add(general_group)
@@ -670,28 +678,29 @@ if __name__ == '__main__':
 
             dbfile = args.database_output_file
 
+            ptable = None
             # Handle new database file. When verbose, alert user that a new
             # capture must occur prior to printing results.
             if not Path(dbfile).exists():
-        
-                print(
-                    '- Initializing capture\n- This may take time depending '\
+                print('\x1b[2J\x1b[H\33[F')
+                ptable = '- Initializing capture\n- This may take time depending '\
                     'on network traffic and filter configurations'
-                )
+                print(ptable)
                 sess = create_db(dbfile)
 
             else:
 
                 sess = create_db(dbfile)
-                output = get_output_table(
+                ptable = get_output_table(
                     sess,
                     sender_lists=sender_lists,
                     target_lists=target_lists,
                     dns_resolve=args.dns_resolve,
                     color_profile=args.color_profile,
                     arp_resolve=args.arp_resolve,
-                    columns=args.output_columns)
-                print('\x1b[2J\x1b[H'+output)
+                    columns=args.output_columns,
+                    display_false=args.display_false)
+                print('\x1b[2J\x1b[H'+ptable)
     
             # Cache packets that will be written to output file
             pkts = []
@@ -710,17 +719,27 @@ if __name__ == '__main__':
                 
                     # Capture packets for the output file
                     if args.pcap_output_file and packets: pkts += packets
-    
-                    output = get_output_table(
+
+                    # Clear the previous table from the screen using
+                    # escape sequences screen
+                    # https://stackoverflow.com/questions/5290994/remove-and-replace-printed-items/5291044#5291044
+                    if ptable:
+                        stdout.write(
+                                '\033[F\033[K'*ptable.split('\n') \
+                                .__len__()
+                            )
+                        
+                    ptable = get_output_table(
                         sess,
                         sender_lists=sender_lists,
                         target_lists=target_lists,
                         dns_resolve=args.dns_resolve,
                         color_profile=args.color_profile,
                         arp_resolve=args.arp_resolve,
-                        columns=args.output_columns)
-                    # Clear the screen and print the results
-                    print('\x1b[2J\x1b[H'+output)
+                        columns=args.output_columns,
+                        display_false=args.display_false)
+
+                    print(ptable)
                     
                 # Do sniffing
                 elif not sniff_result:
