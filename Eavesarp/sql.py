@@ -192,9 +192,10 @@ class Transaction(Base):
     
         if self.target.ptr:
     
-            if self.target.ptr[0].forward_ip != self.target.value:
+            if self.target.ptr[0].forward_ip and \
+                    self.target.ptr[0].forward_ip != self.target.value:
                 return f'True (T:{self.target.value} != ' \
-                       f'P:{self.target.ptr[0].forward_ip})'
+                       f'PTR-FWD:{self.target.ptr[0].forward_ip})'
         
         if display_false:
             return False
