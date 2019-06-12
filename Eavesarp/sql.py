@@ -38,8 +38,7 @@ class IP(Base):
     def __eq__(self,val):
         '''Override to allow string comparison.
         '''
-
-        if klass == str and self.value == val:
+        if val.__class__ == str and self.value == val:
             return True
 
         super().__eq__(val)
@@ -130,6 +129,18 @@ class Transaction(Base):
                 return False
             else:
                 return ''
+
+    def build_snac(self,color_profile=None,display_false=True,
+            *args, **kwargs):
+
+        has_snac = False
+        for t in self.sender.sender_transactions:
+            targ = t.target
+            if targ.arp_resolve_attempted and not targ.mac_address:
+                has_snac = True
+                break
+
+        return has_snac
     
     def build_target_mac(self,*args,**kwargs):
         '''Return the MAC address for the target:
@@ -197,8 +208,8 @@ class Transaction(Base):
     
             if self.stale_target() and self.target.ptr[0].forward_ip and \
                     self.target.ptr[0].forward_ip != self.target.value:
-                return f'True (T:{self.target.value} != ' \
-                       f'PTR-FWD:{self.target.ptr[0].forward_ip})'
+                return f'T-IP:{self.target.value} != ' \
+                       f'PTR-FWD:{self.target.ptr[0].forward_ip}'
         
         if display_false:
             return False

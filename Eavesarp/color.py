@@ -6,7 +6,9 @@ from emoji import emojize
 class ColorProfile:
 
     def __init__(self,even_color,odd_color,header_color,
-            header_bold=True,stale_emoji=None):
+            header_bold=True,stale_emoji=None,snac_emojis=None):
+
+        self.snac_emojis = snac_emojis or (False,True)
 
         self.even_style = colored.fg(even_color)
         self.odd_style = colored.fg(odd_color)
@@ -44,13 +46,18 @@ ColorProfiles = {
     # Novelty color profiles
     'cupcake':ColorProfile(even_color=104, odd_color=164,
         header_color=104, header_bold=True,
-        stale_emoji=emojize(':unicorn_face:')),
+        stale_emoji=emojize(':unicorn_face:'),
+        snac_emojis=(False,emojize(':shortcake:'))),
     'poo':ColorProfile(even_color=136, odd_color=94,
             header_color=136, header_bold=True,
             stale_emoji=emojize(':pile_of_poo:')),
     'foxhound':ColorProfile(even_color=166, odd_color=179,
             header_color=166, header_bold=True,
-            stale_emoji=emojize(':fox_face:')),
+            snac_emojis=(
+                False,emojize(':cigarette:'),
+                ),
+            stale_emoji=emojize(':fox_face:')
+            ),
     'rhino':ColorProfile(even_color=254, odd_color=244,
             header_color=254, header_bold=True,
             stale_emoji=emojize(':rhinoceros:'))

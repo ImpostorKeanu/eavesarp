@@ -28,10 +28,12 @@ COL_MAP = {
     'sender_ptr':'Sender PTR',
     'target_ptr':'Target PTR',
     'target_forward':'Target PTR Forward',
-    'mitm_op':'MITM'
+    'mitm_op':'MITM',
+    'snac':'SNAC',
 }
 
 COL_ORDER = [
+    'snac',
     'sender',
     'target',
     'arp_count',
@@ -52,6 +54,28 @@ def ipv4_from_file(infile):
             else: continue
     
     return addrs
+
+def build_snac(target,snacs,color_profile,display_false=True):
+
+
+    snac = (False,True)[target in snacs]
+
+    # Handle color profile
+    if color_profile and color_profile.snac_emojis:
+
+        # When the snac is valid or false should be
+        # displayed
+        if snac or not snac and display_false:
+            snac = color_profile.snac_emojis[snac]
+        else:
+            snac = ''
+
+    # When the sender isn't a snac
+    elif not snac and not display_false:
+        snac = ''
+
+    return snac
+
 
 def get_output_csv(db_session,order_by=desc,sender_lists=None,
         target_lists=None):
@@ -83,14 +107,32 @@ def get_output_csv(db_session,order_by=desc,sender_lists=None,
     writer = csv.writer(outfile)
     writer.writerow(columns)
 
+    if 'snac' in columns: snacs = get_snacs(db_session)
+    else: snacs = []
+
     # Write all transactions
     for t in transactions:
-        writer.writerow([t.bfh('build_'+col) for col in columns])
+
+        for column in columns:
+
+            writer.writerow([t.bfh('build_'+col,new_sender=True,display_false=True) for col in columns])
 
     outfile.seek(0)
 
     # Return the output
     return outfile
+
+def get_snacs(db_session):
+
+    snacs = []
+
+    # Build the list of snacs
+    snacs = db_session.query(IP) \
+        .filter(IP.arp_resolve_attempted==True) \
+        .filter(IP.mac_address==None) \
+        .all()
+
+    return snacs
 
 def get_output_table(db_session,order_by=desc,sender_lists=None,
         target_lists=None,color_profile=None,dns_resolve=True,
@@ -108,6 +150,27 @@ def get_output_table(db_session,order_by=desc,sender_lists=None,
         output = '- No accepted ARP requests captured\n' \
         '- If this is unexpected, check your whitelist/blacklist configuration'
         return output
+
+    # ==============================
+    # ADD A SNAC COLUMN IF REQUESTED
+    # ==============================
+
+    '''
+    A host has a SNAC when it has no mac_address but has been
+    targeted for ARP resolution. Since an IP object is generic,
+    there is no attribute for 'stale' or 'snac', so a snac
+    state must be inferred on the 'no mac and arp resolved' op.
+
+    1. build a list of ip addresses that have no mac and have 
+    been arp resolved
+    2. as we build each table, check to see if the sender ip
+    is in the list of snacs. if so and this is the first time
+    a sender has been added to the table, then populate the
+    cell with a value of True, False, or and emoji.
+    '''
+
+    if 'snac' in columns: snacs = get_snacs(db_session)
+    else: snacs = []
 
     # =====================================================
     # ADD PTR/STALE COLUMNS WHEN ARP/DNS RESOLVE IS ENABLED
@@ -149,7 +212,19 @@ def get_output_table(db_session,order_by=desc,sender_lists=None,
 
         for col in columns:
 
-            if col == 'sender':
+            if col == 'snac':
+
+                if new_sender:
+                
+                    row.append(
+                        build_snac(t.target,snacs,color_profile,display_false)
+                    )
+
+                else:
+
+                    row.append('')
+
+            elif col == 'sender':
 
                 if new_sender: row.append(sender)
                 else: row.append('')
@@ -698,7 +773,7 @@ if __name__ == '__main__':
                     'on network traffic and filter configurations')
             else:
 
-                print(f'Packets analyzed:  {pcount}\n')
+                print(f'Requests analyzed: {pcount}\n')
                 ptable = get_output_table(
                     sess,
                     sender_lists=sender_lists,
@@ -746,7 +821,7 @@ if __name__ == '__main__':
                         columns=args.output_columns,
                         display_false=args.display_false)
                 
-                    print(f'Packets analyzed:  {pcount}\n')
+                    print(f'Requests analyzed: {pcount}\n')
                     print(ptable)
                     
                 # Do sniffing
