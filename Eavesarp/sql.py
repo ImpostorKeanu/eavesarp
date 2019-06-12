@@ -25,7 +25,7 @@ class IP(Base):
     reverse_dns_attempted = Column(Boolean, nullable=False, default=False,
         doc='''Determines if reverse dns has been made for this host
         ''')
-    mac_address = Column(String, nullable=True, unique=True,
+    mac_address = Column(String, nullable=True,
         doc='''The MAC address obtained via ARP request.
         ''')
     sender_transactions = relationship('Transaction',
@@ -147,13 +147,16 @@ class Transaction(Base):
         elif not self.target.arp_resolve_attempted:
             return '[UNRESOLVED]'
 
-    def build_sender_mac(self,*args,**kwargs):
+    def build_sender_mac(self,new_sender=False,*args,**kwargs):
         '''Return the MAC address for the sender of the
         transaction. Guaranteed to exist since it is associated
         with the sender itself.
         '''
-
-        return self.sender.mac_address
+        
+        if new_sender:
+            return self.sender.mac_address
+        else:
+            return ''
 
     def build_sender_ptr(self,*args,new_sender=False,**kwargs):
         '''Return the PTR value for the sender if available.
@@ -192,7 +195,7 @@ class Transaction(Base):
     
         if self.target.ptr:
     
-            if self.target.ptr[0].forward_ip and \
+            if self.stale_target() and self.target.ptr[0].forward_ip and \
                     self.target.ptr[0].forward_ip != self.target.value:
                 return f'True (T:{self.target.value} != ' \
                        f'PTR-FWD:{self.target.ptr[0].forward_ip})'
@@ -265,6 +268,7 @@ def get_or_create_ip(value, db_session, ptr=None, mac_address=None,
     elif ip and mac_address and ip.mac_address != mac_address:
 
         ip.mac_address = mac_address
+        ip.arp_resolve_attempted = True
         db_session.commit()
 
     return ip

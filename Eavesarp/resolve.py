@@ -42,8 +42,8 @@ def reverse_dns_resolve_ips(db_file):
                     value=ptr,
                     forward_ip=forward_ip)
                 )
-            ip.reverse_dns_attempted = True
-            sess.commit()
+        ip.reverse_dns_attempted = True
+        sess.commit()
 
     sess.close()
 
@@ -83,7 +83,6 @@ def arp_resolve_ips(interface,db_file,verbose=0,retry=0,timeout=1):
             ip.mac_address = hwaddr
 
         ip.arp_resolve_attempted = True
-
         sess.commit()
 
     sess.close()
