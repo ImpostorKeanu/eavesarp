@@ -35,6 +35,7 @@ COL_ORDER = [
     'sender',
     'target',
     'arp_count',
+    'stale'
 ]
 
 
@@ -683,16 +684,21 @@ if __name__ == '__main__':
             # Handle new database file. When verbose, alert user that a new
             # capture must occur prior to printing results.
 
+            arp_resolution = ('disabled','enabled')[args.arp_resolve]
+            dns_resolution = ('disabled','enabled')[args.dns_resolve]
+
             print('\x1b[2J\x1b[H\33[F')
             print(logo+'\n')
-            
+            print(f'Capture interface: {args.interface}')
+            print(f'ARP resolution:    {arp_resolution}')
+            print(f'DNS resolution:    {dns_resolution}')
             sess = create_db(dbfile)
             if not Path(dbfile).exists():
                 print('- Initializing capture\n- This may take time depending '\
                     'on network traffic and filter configurations')
             else:
 
-                print(f'Packets analyzed ({args.interface}): {pcount}\n')
+                print(f'Packets analyzed:  {pcount}\n')
                 ptable = get_output_table(
                     sess,
                     sender_lists=sender_lists,
@@ -740,7 +746,7 @@ if __name__ == '__main__':
                         columns=args.output_columns,
                         display_false=args.display_false)
                 
-                    print(f'Packets analyzed ({args.interface}): {pcount}\n')
+                    print(f'Packets analyzed:  {pcount}\n')
                     print(ptable)
                     
                 # Do sniffing
