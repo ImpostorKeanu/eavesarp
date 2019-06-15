@@ -1,17 +1,20 @@
 #!/usr/bin/env python3
 
+import signal
+import re
+import csv
 from Eavesarp.sql import *
 from Eavesarp.lists import Lists
 from Eavesarp.decorators import *
 from Eavesarp.validators import *
 from Eavesarp.resolve import *
 from Eavesarp.misc import *
-
-import re
+from Eavesarp.output import *
+from Eavesarp.logo import *
 from scapy.all import sniff,ARP,wrpcap,rdpcap,sr
 from time import sleep
-from tabulate import tabulate
 from multiprocessing.pool import Pool
+from sys import stdout
 
 @validate_packet_unpack
 def filter_packet(packet,sender_lists=None,target_lists=None):
@@ -104,7 +107,8 @@ def async_sniff(interface, redraw_frequency, sender_lists,
 
 def analyze(database_output_file, sender_lists=None, target_lists=None,
         analysis_output_file=None, pcap_files=[], sqlite_files=[],
-        color_profile=None, dns_resolve=True, *args, **kwargs):
+        color_profile=None, dns_resolve=True, csv_output_file=None,
+        output_columns=None, *args, **kwargs):
     '''Create a new database and populate it with records stored in
     each type of input file.
     '''
@@ -203,5 +207,220 @@ def analyze(database_output_file, sender_lists=None, target_lists=None,
             packets,
             outdb_sess
         )
+    
+    print(get_output_table(
+        outdb_sess,
+        sender_lists=sender_lists,
+        target_lists=target_lists,
+        color_profile=color_profile,
+        columns=output_columns
+    ))
+
+    if csv_output_file:
+        print(f'- Writing csv output to {csv_output_file}')
+        with open(args.csv_output_file,'w') as outfile:
+            outfile.write(
+                get_output_csv(
+                    outdb_sess,
+                    sender_lists=sender_lists,
+                    target_lists=target_lists
+                ).read()
+            )
 
     outdb_sess.close()
+
+def capture(interface,database_output_file,redraw_frequency,arp_resolve,
+        dns_resolve,sender_lists,target_lists,color_profile,
+        output_columns,display_false,pcap_output_file,*args,**kwargs):
+
+    dbfile = database_output_file
+
+    osigint = signal.signal(signal.SIGINT,signal.SIG_IGN)
+    pool = Pool(3)
+    signal.signal(signal.SIGINT, osigint)
+
+    try:
+
+        # ==============
+        # START SNIFFING
+        # ==============
+
+        '''
+        The sniffer is started in a distinct process because Scapy
+        will block forever when scapy.all.sniff is called. This allows
+        us to interrupt execution of the sniffer by terminating the
+        process.
+
+        TODO: It may be easier to use threading. Pool methods were fresh
+        to me at the time of original development.
+        '''
+
+
+        ptable = None
+        pcount = 0
+        # Handle new database file. When verbose, alert user that a new
+        # capture must occur prior to printing results.
+
+        arp_resolution = ('disabled','enabled')[arp_resolve]
+        dns_resolution = ('disabled','enabled')[dns_resolve]
+
+        print('\x1b[2J\x1b[H\33[F')
+        print(logo+'\n')
+        print(f'Capture interface: {interface}')
+        print(f'ARP resolution:    {arp_resolution}')
+        print(f'DNS resolution:    {dns_resolution}')
+        sess = create_db(dbfile)
+        if not Path(dbfile).exists():
+            print('- Initializing capture\n- This may take time depending '\
+                'on network traffic and filter configurations')
+        else:
+
+            print(f'Requests analyzed: {pcount}\n')
+            ptable = get_output_table(
+                sess,
+                sender_lists=sender_lists,
+                target_lists=target_lists,
+                dns_resolve=dns_resolve,
+                color_profile=color_profile,
+                arp_resolve=arp_resolve,
+                columns=output_columns,
+                display_false=display_false)
+            print(ptable)
+
+        # Cache packets that will be written to output file
+        pkts = []
+        sniff_result = None
+        arp_resolve_result, dns_resolve_result = None, None
+
+        # Loop eternally
+        while True:
+
+
+            # Handle sniff results
+            if sniff_result and sniff_result.ready():
+
+                packets = sniff_result.get()
+                sniff_result = None
+            
+                # Capture packets for the output file
+                if pcap_output_file and packets: pkts += packets
+                
+                if packets: pcount += packets.__len__()
+
+                # Clear the previous table from the screen using
+                # escape sequences screen
+                # https://stackoverflow.com/questions/5290994/remove-and-replace-printed-items/5291044#5291044
+                if ptable:
+                    lcount = ptable.split('\n').__len__()+2
+                    stdout.write('\033[F\033[K'*lcount)
+                        
+                ptable = get_output_table(
+                    sess,
+                    sender_lists=sender_lists,
+                    target_lists=target_lists,
+                    dns_resolve=dns_resolve,
+                    color_profile=color_profile,
+                    arp_resolve=arp_resolve,
+                    columns=output_columns,
+                    display_false=display_false)
+            
+                print(f'Requests analyzed: {pcount}\n')
+                print(ptable)
+                
+            # Do sniffing
+            elif not sniff_result:
+
+               
+                sniff_result = pool.apply_async(
+                    async_sniff,
+                    (
+                        interface,
+                        redraw_frequency,
+                        sender_lists,
+                        target_lists,
+                        database_output_file,
+                    )
+                )
+
+            # ==================
+            # DNS/ARP RESOLUTION
+            # ==================
+   
+            # Do reverse resolution
+            if dns_resolve:
+
+                # Reset dns resolution results
+                if not dns_resolve_result or dns_resolve_result.ready():
+
+                    to_resolve = sess.query(IP) \
+                            .filter(IP.reverse_dns_attempted != True) \
+                            .count()
+
+                    if to_resolve:
+                        
+                       dns_resolve_result = pool.apply_async(
+                            reverse_dns_resolve_ips,
+                            (database_output_file,)
+                        )
+
+            # Do ARP resolution
+            if arp_resolve:
+
+                if not arp_resolve_result or arp_resolve_result.ready():
+
+                    to_resolve = sess.query(IP) \
+                            .filter(IP.arp_resolve_attempted != True) \
+                            .count()
+
+                    if to_resolve:
+
+                        arp_resolve_result = pool.apply_async(
+                            arp_resolve_ips,
+                                (interface, database_output_file,)
+                            )
+
+            sleep(.2)
+
+
+    except KeyboardInterrupt:
+
+        print('\n- CTRL^C Caught...')
+        sess.close()
+
+    finally:
+
+        # ===================
+        # HANDLE OUTPUT FILES
+        # ===================
+
+        if pcap_output_file: wrpcap(pcap_output_file,pkts)
+
+        # =====================
+        # CLOSE CHILD PROCESSES
+        # =====================
+
+        try:
+
+            pool.close()
+
+            if sniff_result:
+                print('- Waiting for the sniffer process...',end='')
+                sniff_result.wait(5)
+                print('done')
+
+            if dns_resolve_result:
+                print('- Waiting for the DNS resolver process...',end='')
+                dns_resolve_result.wait(5)
+                print('done')
+
+            if arp_resolve_result:
+                print('- Waiting for the ARP resolver ocess...',end='')
+                arp_resolve_result.wait(5)
+                print('done')
+
+        except KeyboardInterrupt:
+
+            pool.terminate()
+
+        pool.join()
+
