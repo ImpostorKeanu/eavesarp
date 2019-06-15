@@ -39,7 +39,7 @@ def reverse_dns_resolve_ips(db_file):
         if ptr:
             sess.add(
                 PTR(ip_id=ip.id,
-                    value=ptr,
+                    value=ptr[:ptr.__len__()-1],
                     forward_ip=forward_ip)
                 )
         ip.reverse_dns_attempted = True

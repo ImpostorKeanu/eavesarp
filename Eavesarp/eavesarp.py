@@ -15,6 +15,7 @@ from time import sleep
 from multiprocessing.pool import Pool
 from sys import stdout
 
+
 @validate_packet_unpack
 def filter_packet(packet,sender_lists=None,target_lists=None):
     '''Filter an individual packet. This should be executed in the `lambda`
@@ -269,6 +270,18 @@ def capture(interface,database_output_file,redraw_frequency,arp_resolve,
         print(f'ARP resolution:    {arp_resolution}')
         print(f'DNS resolution:    {dns_resolution}')
         sess = create_db(dbfile)
+
+        # ======================================
+        # CREATE AN IP FOR THE CURRENT INTERFACE
+        # ======================================
+
+
+        iface_mac, iface_ips = get_interfaces()[interface]
+        for ip in iface_ips:
+            ip = get_or_create_ip(ip,
+                sess,
+                mac_address=iface_mac)
+
         if not Path(dbfile).exists():
             print('- Initializing capture\n- This may take time depending '\
                 'on network traffic and filter configurations')

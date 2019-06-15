@@ -2,6 +2,7 @@
 
 from Eavesarp.lists import *
 from Eavesarp.sql import *
+from Eavesarp.misc import get_interfaces
 from tabulate import tabulate
 from io import StringIO
 import csv
@@ -45,6 +46,20 @@ def validate_columns(output_columns):
         exit()
 
     return
+
+def get_interface_table(require_ip=False):
+    
+    rows = [
+            [iface,t[0],'\n'.join(t[1])] for iface,t in
+            get_interfaces(require_ip).items()
+    ]
+    
+
+    return tabulate(
+        rows,
+        ['Interface','MAC','IP Addresses']
+    )
+
 
 def get_output_csv(db_session,order_by=desc,sender_lists=None,
         target_lists=None):

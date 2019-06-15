@@ -20,7 +20,6 @@ _Notes_:
 
 - `eavesarp` requires root privileges to sniff from the interface and craft ARP packets.
 - Captured output is automatically written to disk under the name `eavesarp.db` to prevent having to recapture ARP requests.
-- *Bug Warning*: `eavesarp` currently has an issue where it tends to incorrectly label the attacking host as a SNAC. The maintainer is working toward correcting the issue, but feel free to use the `--blacklist` flag and pass the IP of the attacking/monitoring interface as an argument. This will prevent distractions caused by false positives.
 
 ### Passive Execution
 

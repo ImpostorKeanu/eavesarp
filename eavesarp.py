@@ -11,6 +11,7 @@ from Eavesarp.lists import *
 from Eavesarp.logo import *
 from Eavesarp.output import *
 from Eavesarp import arguments
+from Eavesarp.misc import get_interfaces
 from sys import exit,stdout
 
 # ====================================
@@ -30,6 +31,7 @@ if __name__ == '__main__':
 
     subparsers = main_parser.add_subparsers(help='sub-command help',
         metavar='')
+    
 
     # ============================
     # ANALYZE SUBCOMMAND ARGUMENTS
@@ -168,6 +170,15 @@ if __name__ == '__main__':
     arguments.blacklist.add(blacklist_filter_group)
     arguments.sender_blacklist.add(blacklist_filter_group)
     arguments.target_blacklist.add(blacklist_filter_group)
+    
+    # ==========================
+    # LIST INTERFACES SUBCOMMAND
+    # ==========================
+    
+    lip = list_interfaces_parser = subparsers.add_parser('list',
+        aliases=['l'],
+        help='List available network interfaces')
+    lip.set_defaults(cmd='list')
 
     # ===============
     # PARSE ARGUMENTS
@@ -184,6 +195,11 @@ if __name__ == '__main__':
     
     if hasattr(args,'output_columns'):
         validate_columns(args.output_columns)
+    elif args.cmd == 'list':
+        print('Getting network interfaces...')
+        print('\n'+get_interface_table()+'\n')
+        print('Exiting!')
+        exit()
     else:
         print('- Output columns are required')
         print('Exiting!')
@@ -216,6 +232,16 @@ if __name__ == '__main__':
 
     # Capture and exit
     elif args.cmd == 'capture':
+
+        interfaces = get_interfaces()
+        if args.interface not in interfaces or not interfaces[args.interface][0]:
+            valids = ', '.join([i for i,vs in interfaces.items() if vs[1]])
+            print(f'Invalid interface provided: {args.interface}' \
+            f'\n\nValid interfaces:\n\n{get_interface_table(True)}\n' \
+            '\nFYI: An interface is valid only when it has an IP\n\n' \
+            'Exiting!')
+            exit()
+
 
         capture(**args.__dict__,
             sender_lists=sender_lists,
