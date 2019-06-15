@@ -2,7 +2,6 @@
 
 import signal
 import re
-import csv
 from Eavesarp.sql import *
 from Eavesarp.lists import Lists
 from Eavesarp.decorators import *
@@ -218,7 +217,7 @@ def analyze(database_output_file, sender_lists=None, target_lists=None,
 
     if csv_output_file:
         print(f'- Writing csv output to {csv_output_file}')
-        with open(args.csv_output_file,'w') as outfile:
+        with open(csv_output_file,'w') as outfile:
             outfile.write(
                 get_output_csv(
                     outdb_sess,

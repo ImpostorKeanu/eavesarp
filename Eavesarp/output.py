@@ -4,6 +4,7 @@ from Eavesarp.lists import *
 from Eavesarp.sql import *
 from tabulate import tabulate
 from io import StringIO
+import csv
 
 # ===================
 # CONSTANTS/FUNCTIONS
@@ -81,9 +82,9 @@ def get_output_csv(db_session,order_by=desc,sender_lists=None,
     # Write all transactions
     for t in transactions:
 
-        for column in columns:
-
-            writer.writerow([t.bfh('build_'+col,new_sender=True,display_false=True) for col in columns])
+        writer.writerow(
+            [t.bfh('build_'+col,new_sender=True,display_false=True) for col in columns]
+        )
 
     outfile.seek(0)
 
