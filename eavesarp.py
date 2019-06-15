@@ -4,7 +4,6 @@ import argparse
 import signal
 import pdb
 import csv
-from io import StringIO
 from Eavesarp.eavesarp import *
 from Eavesarp.color import ColorProfiles
 from Eavesarp.decorators import *
@@ -12,271 +11,9 @@ from Eavesarp.validators import *
 from Eavesarp.resolve import *
 from Eavesarp.lists import *
 from Eavesarp.logo import *
+from Eavesarp.output import *
 from sys import exit,stdout
-from io import StringIO
-# ===================
-# CONSTANTS/FUNCTIONS
-# ===================
 
-COL_MAP = {
-    'arp_count':'ARP#',
-    'sender':'Sender',
-    'sender_mac':'Sender MAC',
-    'target':'Target',
-    'target_mac':'Target MAC',
-    'stale':'Stale',
-    'sender_ptr':'Sender PTR',
-    'target_ptr':'Target PTR',
-    'target_forward':'Target PTR Forward',
-    'mitm_op':'MITM',
-    'snac':'SNAC',
-}
-
-COL_ORDER = [
-    'snac',
-    'sender',
-    'target',
-    'arp_count',
-    'stale'
-]
-
-
-@validate_file_presence
-def ipv4_from_file(infile):
-
-    addrs = []
-    with open(infile) as lines:
-
-        for line in lines:
-
-            line = line.strip()
-            if validate_ipv4(line): addrs.append(line)
-            else: continue
-    
-    return addrs
-
-def build_snac(target,snacs,color_profile,display_false=True):
-
-
-    snac = (False,True)[target in snacs]
-
-    # Handle color profile
-    if color_profile and color_profile.snac_emojis:
-
-        # When the snac is valid or false should be
-        # displayed
-        if snac or not snac and display_false:
-            snac = color_profile.snac_emojis[snac]
-        else:
-            snac = ''
-
-    # When the sender isn't a snac
-    elif not snac and not display_false:
-        snac = ''
-
-    return snac
-
-
-def get_output_csv(db_session,order_by=desc,sender_lists=None,
-        target_lists=None):
-
-    # ==========================
-    # HANDLE SENDER/TARGET LISTS
-    # ==========================
-    
-    sender_lists = sender_lists or Lists()
-    target_lists = target_lists or Lists()
-
-    # ===============
-    # PREPARE COLUMNS
-    # ===============
-
-    columns = list(COL_MAP.keys())
-
-    # ====================
-    # GET ALL TRANSACTIONS
-    # ====================
-
-    transactions = get_transactions(db_session,order_by)
-
-    # =============================
-    # WRITE CSVS TO STRINGIO OBJECT
-    # =============================
-
-    outfile = StringIO()
-    writer = csv.writer(outfile)
-    writer.writerow(columns)
-
-    if 'snac' in columns: snacs = get_snacs(db_session)
-    else: snacs = []
-
-    # Write all transactions
-    for t in transactions:
-
-        for column in columns:
-
-            writer.writerow([t.bfh('build_'+col,new_sender=True,display_false=True) for col in columns])
-
-    outfile.seek(0)
-
-    # Return the output
-    return outfile
-
-def get_snacs(db_session):
-
-    snacs = []
-
-    # Build the list of snacs
-    snacs = db_session.query(IP) \
-        .filter(IP.arp_resolve_attempted==True) \
-        .filter(IP.mac_address==None) \
-        .all()
-
-    return snacs
-
-def get_output_table(db_session,order_by=desc,sender_lists=None,
-        target_lists=None,color_profile=None,dns_resolve=True,
-        arp_resolve=False,columns=COL_ORDER,display_false=False):
-    '''Extract transaction records from the database and return
-    them formatted as a table.
-    '''
-
-    sender_lists = sender_lists or Lists()
-    target_lists = target_lists or Lists()
-
-    transactions = get_transactions(db_session,order_by)
-
-    if not transactions:
-        output = '- No accepted ARP requests captured\n' \
-        '- If this is unexpected, check your whitelist/blacklist configuration'
-        return output
-
-    # ==============================
-    # ADD A SNAC COLUMN IF REQUESTED
-    # ==============================
-
-    '''
-    A host has a SNAC when it has no mac_address but has been
-    targeted for ARP resolution. Since an IP object is generic,
-    there is no attribute for 'stale' or 'snac', so a snac
-    state must be inferred on the 'no mac and arp resolved' op.
-
-    1. build a list of ip addresses that have no mac and have 
-    been arp resolved
-    2. as we build each table, check to see if the sender ip
-    is in the list of snacs. if so and this is the first time
-    a sender has been added to the table, then populate the
-    cell with a value of True, False, or and emoji.
-    '''
-
-    if 'snac' in columns: snacs = get_snacs(db_session)
-    else: snacs = []
-
-    # =====================================================
-    # ADD PTR/STALE COLUMNS WHEN ARP/DNS RESOLVE IS ENABLED
-    # =====================================================
-
-    if arp_resolve and not 'stale' in columns \
-            and columns == COL_ORDER:
-        columns.append('stale')
-
-    if dns_resolve and columns == COL_ORDER:
-        if not 'sender_ptr' in columns:
-            columns.append('sender_ptr')
-        if not 'target_ptr' in columns:
-            columns.append('target_ptr')
-        if not 'mitm_op' in columns:
-            columns.append('mitm_op')
-
-    # Organize all the records by sender IP
-    rowdict = {}
-    for t in transactions:
-
-        smac = t.sender.mac_address
-
-        sender = t.sender.value
-        target = t.target.value
-
-        # ====================
-        # FILTER BY IP ADDRESS
-        # ====================
-
-        if not filter_lists(sender_lists,target_lists,sender,target):
-            continue
-
-        # Flag to determine if the sender is new
-        if sender not in rowdict: new_sender = True
-        else: new_sender = False
-
-        row = []
-
-        for col in columns:
-
-            if col == 'snac':
-
-                if new_sender:
-                
-                    row.append(
-                        build_snac(t.target,snacs,color_profile,display_false)
-                    )
-
-                else:
-
-                    row.append('')
-
-            elif col == 'sender':
-
-                if new_sender: row.append(sender)
-                else: row.append('')
-
-            elif col == 'target':
-
-                row.append(target)
-
-            elif col == 'stale':
-
-                row.append(t.build_stale(color_profile,
-                    display_false=display_false))
-
-            else:
-
-                if col == 'arp_count': col = 'count'
-
-                row.append(
-                    t.bfh('build_'+col,new_sender=new_sender,
-                        display_false=display_false)
-                )
-
-        if new_sender: rowdict[sender] = [row]
-        else: rowdict[sender].append(row)
-
-    # Restructure dictionary into a list of rows
-    rows = []
-    counter = 0
-
-    for sender,irows in rowdict.items():
-        counter += 1
-
-        # Color odd rows slightly darker
-        if color_profile:
-
-            if counter % 2:
-                rows += [color_profile.style_odd([v for v in r]) for r in irows]
-            else:
-                rows += [color_profile.style_even(r) for r in irows]
-
-        # Just add the rows otherwise
-        else: rows += irows
-
-    headers = [COL_MAP[col] for col in columns]
-
-    # Color the headers
-    if color_profile: headers = color_profile.style_header(headers)
-
-    # Return the output as a table
-    return tabulate(
-            rows,
-            headers=headers)
 
 # ====================================
 # BUSH LEAGUE: Make arguments reusable
@@ -541,27 +278,21 @@ if __name__ == '__main__':
     # ============================
     # CHECKING COLUMN ORDER VALUES
     # ============================
-
+    
     if hasattr(args,'output_columns'):
-
-        if not args.output_columns:
-            print('- Output columns are required')
-            print('Exiting!')
-            exit()
-
-        vals = COL_MAP.keys()
-        bad = [v for v in args.output_columns if not v in vals]
-
-        if bad:
-
-            print('- Invalid column values provided: ',','.join(bad))
-            print('- Valid values: ',','.join(vals))
-            print('Exiting!')
-            exit()
+        validate_columns(args.output_columns)
+    else:
+        print('- Output columns are required')
+        print('Exiting!')
+        exit()
 
     # =====================================
     # INITIALIZE WHITELIST/BLACKLIST TUPLES
     # =====================================
+
+    sender_lists, target_lists = initialize_lists(
+        **{k:v for k,v in args.__dict__.items() if k.endswith('list')}        
+    )
 
     sender_lists = Lists()
     target_lists = Lists()
@@ -793,6 +524,7 @@ if __name__ == '__main__':
             # Loop eternally
             while True:
 
+
                 # Handle sniff results
                 if sniff_result and sniff_result.ready():
 
@@ -826,6 +558,7 @@ if __name__ == '__main__':
                     
                 # Do sniffing
                 elif not sniff_result:
+
                    
                     sniff_result = pool.apply_async(
                         async_sniff,

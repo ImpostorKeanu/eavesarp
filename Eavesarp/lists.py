@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 
+from Eavesarp.decorators import *
+
 class Lists:
 
     def __init__(self,white=None,black=None):
@@ -58,3 +60,106 @@ def filter_lists(sender_lists,target_lists,sender,target):
             return False
         else:
             return True
+
+@validate_file_presence
+def ipv4_from_file(infile):
+
+    addrs = []
+    with open(infile) as lines:
+
+        for line in lines:
+
+            line = line.strip()
+            if validate_ipv4(line): addrs.append(line)
+            else: continue
+    
+    return addrs
+
+def load_lists(values=None):
+
+    values = values or []
+
+    output = []
+
+    for val in values:
+
+        if not validate_ipv4(val):
+
+            if not Path(ival).exists():
+
+                print(
+                    f'Invalid ipv4 address and unknown file, skipping: {ival}'
+                )
+
+            else: output += ipv4_from_file(ival)
+
+        else: output.append(val)
+
+    return output
+
+def initialize_lists(whitelist=None,blacklist=None,
+        sender_whitelist=None,sender_blacklist=None,
+        target_whitelist=None,target_blacklist=None):
+
+    whitelist = load_lists(whitelist or [])
+    blacklist = load_lists(blacklist or [])
+
+    sender_lists = Lists(
+        white=load_lists(sender_whitelist or []),
+        black=load_lists(sender_blacklist or [])
+    )
+
+    target_lists = Lists(
+        white=load_lists(target_whitelist or []),
+        black=load_lists(target_blacklist or [])
+    )
+
+    # ==================================
+    # POPULATE GENERAL WHITE/BLACK LISTS
+    # ==================================
+
+    for list_type in ['white','black']:
+
+        values = locals()[list_type+'list']
+
+        # Adding ips to both sender white/black lists
+        for host_type in ['sender','target']:
+
+            lst = locals()[host_type+'_lists'].__getattribute__(list_type)
+            lst += values
+
+    # ============================================
+    # PREVENT DUPLICATE VALUES BETWEEN WHITE/BLACK
+    # ============================================
+
+    for handle in ['sender_lists','target_lists']:
+
+        tpe = handle.split('_')[0]
+        var = locals()[handle]
+
+        counter = 0
+        while counter < var.white.__len__():
+
+            val = var.white[counter]
+
+            # Use error thrown by list.index to determine if
+            # a given value exists in both the white and black
+            # lists.
+            try:
+
+                # When a value appears in both the black and white list
+                # of a given lists object, remove them both.
+                ind = var.black.index(val)
+                var.white.__delitem__(counter)
+                var.black.__delitem__(ind)
+
+            except ValueError:
+
+                # Increment the counter
+                counter += 1
+                continue
+
+        var.white = list(set(var.white))
+        var.black = list(set(var.black))
+
+    return sender_lists,target_lists
