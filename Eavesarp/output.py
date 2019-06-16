@@ -106,7 +106,9 @@ def get_output_csv(db_session,order_by=desc,sender_lists=None,
     # Return the output
     return outfile
 
-def get_snacs(db_session):
+def get_stale_ips(db_session):
+    '''Return a list of IP objects that are known to be SNACs.
+    '''
 
     snacs = []
 
@@ -118,10 +120,11 @@ def get_snacs(db_session):
 
     return snacs
 
-def build_snac(target,snacs,color_profile,display_false=True):
+def build_snac(target,stale_ips,color_profile,display_false=True):
+    '''Build the SNAC value for a given sender.
+    '''
 
-
-    snac = (False,True)[target in snacs]
+    snac = (False,True)[target in stale_ips]
 
     # Handle color profile
     if color_profile and color_profile.snac_emojis:
@@ -130,6 +133,8 @@ def build_snac(target,snacs,color_profile,display_false=True):
         # displayed
         if snac or not snac and display_false:
             snac = color_profile.snac_emojis[snac]
+        elif display_false:
+            pass
         else:
             snac = ''
 
@@ -141,7 +146,8 @@ def build_snac(target,snacs,color_profile,display_false=True):
 
 def get_output_table(db_session,order_by=desc,sender_lists=None,
         target_lists=None,color_profile=None,dns_resolve=True,
-        arp_resolve=False,columns=COL_ORDER,display_false=False):
+        arp_resolve=False,columns=COL_ORDER,display_false=False,
+        force_sender=False):
     '''Extract transaction records from the database and return
     them formatted as a table.
     '''
@@ -169,13 +175,13 @@ def get_output_table(db_session,order_by=desc,sender_lists=None,
     1. build a list of ip addresses that have no mac and have 
     been arp resolved
     2. as we build each table, check to see if the sender ip
-    is in the list of snacs. if so and this is the first time
+    is in the list of stale. if so and this is the first time
     a sender has been added to the table, then populate the
     cell with a value of True, False, or and emoji.
     '''
 
-    if 'snac' in columns: snacs = get_snacs(db_session)
-    else: snacs = []
+    if 'snac' in columns: stale = get_stale_ips(db_session)
+    else: stale = []
 
     # =====================================================
     # ADD PTR/STALE COLUMNS WHEN ARP/DNS RESOLVE IS ENABLED
@@ -219,10 +225,11 @@ def get_output_table(db_session,order_by=desc,sender_lists=None,
 
             if col == 'snac':
 
-                if new_sender:
+                if new_sender or force_sender:
                 
                     row.append(
-                        build_snac(t.target,snacs,color_profile,display_false)
+                        build_snac(t.target,stale,color_profile,
+                            display_false)
                     )
 
                 else:
@@ -231,7 +238,7 @@ def get_output_table(db_session,order_by=desc,sender_lists=None,
 
             elif col == 'sender':
 
-                if new_sender: row.append(sender)
+                if new_sender or force_sender: row.append(sender)
                 else: row.append('')
 
             elif col == 'target':
@@ -249,7 +256,8 @@ def get_output_table(db_session,order_by=desc,sender_lists=None,
 
                 row.append(
                     t.bfh('build_'+col,new_sender=new_sender,
-                        display_false=display_false)
+                        display_false=display_false,
+                        force_sender=force_sender)
                 )
 
         if new_sender: rowdict[sender] = [row]

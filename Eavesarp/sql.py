@@ -158,31 +158,39 @@ class Transaction(Base):
         elif not self.target.arp_resolve_attempted:
             return '[UNRESOLVED]'
 
-    def build_sender_mac(self,new_sender=False,*args,**kwargs):
+    def build_sender_mac(self,new_sender=False,force_sender=False,
+            *args,**kwargs):
         '''Return the MAC address for the sender of the
         transaction. Guaranteed to exist since it is associated
         with the sender itself.
         '''
         
-        if new_sender:
+        if new_sender or force_sender:
             return self.sender.mac_address
         else:
             return ''
 
-    def build_sender_ptr(self,*args,new_sender=False,**kwargs):
+    def build_sender_ptr(self,*args,new_sender=False,force_sender=False,
+            display_false=False,**kwargs):
         '''Return the PTR value for the sender if available.
         '''
 
-        sptr = self.sender.ptr[0].value if self.sender.ptr \
-                and new_sender else ''
+        sptr = ''
+        if self.sender.ptr and (new_sender or force_sender):
+            sptr = self.sender.ptr[0].value
+        elif display_false: sptr = None
 
         return sptr
 
-    def build_target_ptr(self,*args,**kwargs):
+    def build_target_ptr(self,display_false=False,*args,**kwargs):
         '''Return the PTR value for the target if available.
         '''
 
-        tptr = self.target.ptr[0].value if self.target.ptr else ''
+        tptr = ''
+        if self.target.ptr:
+            tptr = self.target.ptr[0].value 
+        elif display_false:
+            tptr = None
 
         return tptr
 

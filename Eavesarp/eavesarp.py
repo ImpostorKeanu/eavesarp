@@ -231,7 +231,8 @@ def analyze(database_output_file, sender_lists=None, target_lists=None,
 
 def capture(interface,database_output_file,redraw_frequency,arp_resolve,
         dns_resolve,sender_lists,target_lists,color_profile,
-        output_columns,display_false,pcap_output_file,*args,**kwargs):
+        output_columns,display_false,pcap_output_file,force_sender,
+        *args,**kwargs):
 
     dbfile = database_output_file
 
@@ -296,7 +297,8 @@ def capture(interface,database_output_file,redraw_frequency,arp_resolve,
                 color_profile=color_profile,
                 arp_resolve=arp_resolve,
                 columns=output_columns,
-                display_false=display_false)
+                display_false=display_false,
+                force_sender=force_sender)
             print(ptable)
 
         # Cache packets that will be written to output file
@@ -334,7 +336,8 @@ def capture(interface,database_output_file,redraw_frequency,arp_resolve,
                     color_profile=color_profile,
                     arp_resolve=arp_resolve,
                     columns=output_columns,
-                    display_false=display_false)
+                    display_false=display_false,
+                    force_sender=force_sender)
             
                 print(f'Requests analyzed: {pcount}\n')
                 print(ptable)

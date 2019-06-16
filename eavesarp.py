@@ -31,7 +31,6 @@ if __name__ == '__main__':
 
     subparsers = main_parser.add_subparsers(help='sub-command help',
         metavar='')
-    
 
     # ============================
     # ANALYZE SUBCOMMAND ARGUMENTS
@@ -128,6 +127,7 @@ if __name__ == '__main__':
         help='''Enables display of false values in output columns.
         ''')
 
+    arguments.force_sender.add(general_group)
     arguments.color_profile.add(general_group)
     arguments.dns_resolve.add(general_group)
     

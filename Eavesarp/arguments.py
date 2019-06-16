@@ -96,3 +96,14 @@ color_profile = Argument('--color-profile','-cp',
     choices=list(ColorProfiles.keys()),
     help=''''Color profile to use. Set to "disable" to remove color
     altogether.''')
+
+force_sender = Argument('--force-sender','-fs',
+    action='store_true',
+    help='''Force sender information for all table rows.
+    ''')
+
+color_profile = Argument('--color-profile','-cp',
+    default='default',
+    choices=list(ColorProfiles.keys()),
+    help=''''Color profile to use. Set to "disable" to remove color
+    altogether.''')
