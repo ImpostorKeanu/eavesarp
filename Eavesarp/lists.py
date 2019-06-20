@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 from Eavesarp.decorators import *
+from pathlib import Path
 
 class Lists:
 
