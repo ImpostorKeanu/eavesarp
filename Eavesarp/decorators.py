@@ -2,6 +2,7 @@
 
 from .validators import *
 from .misc import *
+from pathlib import Path
 
 def validate_file_presence(func):
     '''Determine if a file is found on the local filesystem.

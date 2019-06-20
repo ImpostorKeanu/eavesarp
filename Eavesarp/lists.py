@@ -86,13 +86,13 @@ def load_lists(values=None):
 
         if not validate_ipv4(val):
 
-            if not Path(ival).exists():
+            if not Path(val).exists():
 
                 print(
-                    f'Invalid ipv4 address and unknown file, skipping: {ival}'
+                    f'Invalid ipv4 address and unknown file, skipping: {val}'
                 )
 
-            else: output += ipv4_from_file(ival)
+            else: output += ipv4_from_file(val)
 
         else: output.append(val)
 
