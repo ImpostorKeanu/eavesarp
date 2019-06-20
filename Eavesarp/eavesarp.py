@@ -19,7 +19,7 @@ from sys import stdout
 @validate_packet_unpack
 def filter_packet(packet,sender_lists=None,target_lists=None):
     '''Filter an individual packet. This should be executed in the `lambda`
-    supplied to `do_sniff`. `sender_lists` and `target_lists` should be 
+    supplied to `do_sniff`. `sender_lists` and `target_lists` should be
     objects of type `List()`.
     '''
 
@@ -52,7 +52,7 @@ def handle_packets(packets,db_session):
         target = get_or_create_ip(target,
                 db_session)
 
-        # Determine if a transaction record for the 
+        # Determine if a transaction record for the
           # target/sender pair exists
             # if not, create it
             # else, get and increment it
@@ -82,7 +82,7 @@ def do_sniff(interfaces,redraw_frequency,sender_lists,target_lists):
         lfilter=lambda pkt: filter_packet(pkt,sender_lists,target_lists),
         count=redraw_frequency
     )
-   
+
 def async_sniff(interface, redraw_frequency, sender_lists,
         target_lists, dbfile):
     '''This function should be started in a distinct process, allowing
@@ -125,7 +125,7 @@ def analyze(database_output_file, sender_lists=None, target_lists=None,
     each IP in the process.
     '''
     for sfile in sqlite_files:
-        
+
         isess = create_db(sfile)
 
         # ====================================================
@@ -146,7 +146,7 @@ def analyze(database_output_file, sender_lists=None, target_lists=None,
                 for attr in ['value','arp_resolve_attempted',
                     'reverse_dns_attempted', 'mac_address']:
                     kwargs[attr] = tip.__getattribute__(attr)
-               
+
                 # Create the new IP
                 ip = get_or_create_ip(**kwargs)
 
@@ -207,7 +207,7 @@ def analyze(database_output_file, sender_lists=None, target_lists=None,
             packets,
             outdb_sess
         )
-    
+
     print(get_output_table(
         outdb_sess,
         sender_lists=sender_lists,
@@ -315,10 +315,10 @@ def capture(interface,database_output_file,redraw_frequency,arp_resolve,
 
                 packets = sniff_result.get()
                 sniff_result = None
-            
+
                 # Capture packets for the output file
                 if pcap_output_file and packets: pkts += packets
-                
+
                 if packets: pcount += packets.__len__()
 
                 # Clear the previous table from the screen using
@@ -327,7 +327,7 @@ def capture(interface,database_output_file,redraw_frequency,arp_resolve,
                 if ptable:
                     lcount = ptable.split('\n').__len__()+2
                     stdout.write('\033[F\033[K'*lcount)
-                        
+
                 ptable = get_output_table(
                     sess,
                     sender_lists=sender_lists,
@@ -338,14 +338,14 @@ def capture(interface,database_output_file,redraw_frequency,arp_resolve,
                     columns=output_columns,
                     display_false=display_false,
                     force_sender=force_sender)
-            
+
                 print(f'Requests analyzed: {pcount}\n')
                 print(ptable)
-                
+
             # Do sniffing
             elif not sniff_result:
 
-               
+
                 sniff_result = pool.apply_async(
                     async_sniff,
                     (
@@ -360,7 +360,7 @@ def capture(interface,database_output_file,redraw_frequency,arp_resolve,
             # ==================
             # DNS/ARP RESOLUTION
             # ==================
-   
+
             # Do reverse resolution
             if dns_resolve:
 
@@ -372,7 +372,7 @@ def capture(interface,database_output_file,redraw_frequency,arp_resolve,
                             .count()
 
                     if to_resolve:
-                        
+
                        dns_resolve_result = pool.apply_async(
                             reverse_dns_resolve_ips,
                             (database_output_file,)

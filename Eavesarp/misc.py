@@ -20,14 +20,14 @@ def get_interfaces(require_ip=False):
     for iface in netifaces.interfaces():
 
         if iface == 'lo': continue
-        
+
         addrs = netifaces.ifaddresses(iface)
 
         try: ips = [a['addr'] for a in addrs[2]]
         except: ips = []
 
         try: hwaddr = [a['addr'] for a in addrs[17]][0]
-        except: hwaddr = []
+        except: hwaddr = ''
 
         if require_ip and not ips: continue
 
