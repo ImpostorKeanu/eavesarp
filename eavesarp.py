@@ -78,12 +78,12 @@ if __name__ == '__main__':
     awfg = aw_filter_group = analyze_parser.add_argument_group(
         'Whitelist IP Filter Parameters'
     )
-    
+
     arguments.whitelist.add(awfg)
     arguments.sender_whitelist.add(awfg)
     arguments.target_whitelist.add(awfg)
 
-    # BLACKLISTS    
+    # BLACKLISTS
     abfg = ab_filter_group = analyze_parser.add_argument_group(
         'Blacklist IP Filter Parameters'
     )
@@ -113,7 +113,7 @@ if __name__ == '__main__':
         default='eth0',
         help='''Interface to sniff from.
         ''')
-    
+
     # Stdout Configuration
     general_group.add_argument('--redraw-frequency','-rf',
         default=5,
@@ -130,7 +130,7 @@ if __name__ == '__main__':
     arguments.force_sender.add(general_group)
     arguments.color_profile.add(general_group)
     arguments.dns_resolve.add(general_group)
-    
+
     general_group.add_argument('--arp-resolve','-ar',
         action='store_true',
         help='''Set this flag shoud you wish to attempt
@@ -157,11 +157,11 @@ if __name__ == '__main__':
     whitelist_filter_group = capture_parser.add_argument_group(
         'Whitelist IP Filter Parameters'
     )
-    
+
     arguments.whitelist.add(whitelist_filter_group)
     arguments.sender_whitelist.add(whitelist_filter_group)
     arguments.target_whitelist.add(whitelist_filter_group)
-    
+
     # Address blacklist filters
     blacklist_filter_group = capture_parser.add_argument_group(
         'Whitelist IP Filter Parameters'
@@ -170,11 +170,11 @@ if __name__ == '__main__':
     arguments.blacklist.add(blacklist_filter_group)
     arguments.sender_blacklist.add(blacklist_filter_group)
     arguments.target_blacklist.add(blacklist_filter_group)
-    
+
     # ==========================
     # LIST INTERFACES SUBCOMMAND
     # ==========================
-    
+
     lip = list_interfaces_parser = subparsers.add_parser('list',
         aliases=['l'],
         help='List available network interfaces')
@@ -186,13 +186,13 @@ if __name__ == '__main__':
 
     args = main_parser.parse_args()
     if not args.cmd:
-        main_parser.print_help() 
+        main_parser.print_help()
         exit()
 
     # ============================
     # CHECKING COLUMN ORDER VALUES
     # ============================
-    
+
     if hasattr(args,'output_columns'):
         validate_columns(args.output_columns)
     elif args.cmd == 'list':
@@ -210,7 +210,7 @@ if __name__ == '__main__':
     # =====================================
 
     sender_lists, target_lists = initialize_lists(
-        **{k:v for k,v in args.__dict__.items() if k.endswith('list')}        
+        **{k:v for k,v in args.__dict__.items() if k.endswith('list')}
     )
 
     # ============================
@@ -234,7 +234,7 @@ if __name__ == '__main__':
     elif args.cmd == 'capture':
 
         interfaces = get_interfaces()
-        if args.interface not in interfaces or not interfaces[args.interface][0]:
+        if args.interface not in interfaces or not interfaces[args.interface][1]:
             valids = ', '.join([i for i,vs in interfaces.items() if vs[1]])
             print(f'Invalid interface provided: {args.interface}' \
             f'\n\nValid interfaces:\n\n{get_interface_table(True)}\n' \
