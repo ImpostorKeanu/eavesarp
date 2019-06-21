@@ -105,7 +105,11 @@ if __name__ == '__main__':
 
     # General configuration Options
     general_group = capture_parser.add_argument_group(
-        'General Configuration Parameters'
+        'General Configuration Parameters',
+        '''Determine the appropriate sniffer interface and
+        how frequently to redraw the output table, which occurs
+        after the capture of n number of packets.
+        '''
     )
 
     # Capture interfaces
@@ -122,27 +126,23 @@ if __name__ == '__main__':
         are sniffed from the interface.
         ''')
 
-    general_group.add_argument('--display-false','-ds',
-        action='store_true',
-        help='''Enables display of false values in output columns.
-        ''')
-
-    arguments.force_sender.add(general_group)
-    arguments.color_profile.add(general_group)
-    arguments.dns_resolve.add(general_group)
-
-    general_group.add_argument('--arp-resolve','-ar',
-        action='store_true',
-        help='''Set this flag shoud you wish to attempt
-        active ARP requests for target IPs. While this
-        will confirm if a static IP configuration is
-        affecting a given sender, it is an active reconnaissance
-        technique.'''
+    resolution_group = capture_parser.add_argument_group(
+        'Active Resolution Parameters',
+        '''Enable DNS and ARP resolution.'''
     )
+
+    resolution_group.add_argument('--arp-resolve','-ar',
+        action='store_true',
+        help='''Perform active ARP resolution for each target.'''
+    )
+    arguments.dns_resolve.add(resolution_group)
 
     # OUTPUT FILES
     output_group = capture_parser.add_argument_group(
-        'Output Configuration Parameters'
+        'Output Configuration Parameters',
+        '''Determine output files and the structure
+        of the table drawn to stdout during execution.
+        '''
     )
     arguments.database_output_file.add(output_group)
 
@@ -152,10 +152,22 @@ if __name__ == '__main__':
         ''')
 
     arguments.output_columns.add(output_group)
+    
+    output_group.add_argument('--display-false','-ds',
+        action='store_true',
+        help='''Enables display of false values in output columns.
+        ''')
+    
+    arguments.force_sender.add(output_group)
+    arguments.color_profile.add(output_group)
 
     # Address whitelist filters
     whitelist_filter_group = capture_parser.add_argument_group(
-        'Whitelist IP Filter Parameters'
+        'Whitelist IP Filter Parameters',
+        '''Specify which IPs to show in output. Expects a combination
+        of space delimted values. Either IP addresses or file names
+        containing newline delimited IP addresses are expected. Mix
+        and match is supported.'''
     )
 
     arguments.whitelist.add(whitelist_filter_group)
@@ -164,7 +176,12 @@ if __name__ == '__main__':
 
     # Address blacklist filters
     blacklist_filter_group = capture_parser.add_argument_group(
-        'Whitelist IP Filter Parameters'
+        'Blacklist IP Filter Parameters',
+        '''IPs to be suppressed from the output table. Expects a
+        combination of space delimted values. Either IP addresses or
+        file names containing newline delimited IP addresses are 
+        expected. Mix and match is supported.
+        '''
     )
 
     arguments.blacklist.add(blacklist_filter_group)

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-from Eavesarp.output import COL_ORDER
+from Eavesarp.output import COL_ORDER,COL_MAP
 from Eavesarp.color import ColorProfiles
 
 class Argument:
@@ -55,7 +55,7 @@ sender_blacklist = Argument('--sender-blacklist','-sb',
 
 target_blacklist = Argument('--target-blacklist','-tb',
     nargs='+',
-    help='''Sender IP addresses that should be ignored.
+    help='''Target IP addresses that should be ignored.
     ''')
 
 database_output_file = Argument('--database-output-file','-dof',
@@ -82,8 +82,8 @@ output_columns = Argument('--output-columns','-oc',
     nargs='+',
     help='''Space delimited list of columns to show in output.
     Columns will be displayed in the order as provided. Default:
-    %(default)s
-    ''')
+    %(default)s. Valid Values: 
+    '''+', '.join(list(COL_MAP.keys())))
 
 # Reverse DNS Configuration
 dns_resolve = Argument('--dns-resolve','-dr',
@@ -94,7 +94,7 @@ dns_resolve = Argument('--dns-resolve','-dr',
 color_profile = Argument('--color-profile','-cp',
     default='default',
     choices=list(ColorProfiles.keys()),
-    help=''''Color profile to use. Set to "disable" to remove color
+    help='''Color profile to use. Set to "disable" to remove color
     altogether.''')
 
 force_sender = Argument('--force-sender','-fs',
