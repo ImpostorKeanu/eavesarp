@@ -108,7 +108,7 @@ def async_sniff(interface, redraw_frequency, sender_lists,
 def analyze(database_output_file, sender_lists=None, target_lists=None,
         analysis_output_file=None, pcap_files=[], sqlite_files=[],
         color_profile=None, dns_resolve=True, csv_output_file=None,
-        output_columns=None, *args, **kwargs):
+        output_columns=None, stale_only=False, *args, **kwargs):
     '''Create a new database and populate it with records stored in
     each type of input file.
     '''
@@ -213,7 +213,8 @@ def analyze(database_output_file, sender_lists=None, target_lists=None,
         sender_lists=sender_lists,
         target_lists=target_lists,
         color_profile=color_profile,
-        columns=output_columns
+        columns=output_columns,
+        stale_only=stale_only
     ))
 
     if csv_output_file:
@@ -232,7 +233,7 @@ def analyze(database_output_file, sender_lists=None, target_lists=None,
 def capture(interface,database_output_file,redraw_frequency,arp_resolve,
         dns_resolve,sender_lists,target_lists,color_profile,
         output_columns,display_false,pcap_output_file,force_sender,
-        *args,**kwargs):
+        stale_only,*args,**kwargs):
 
     dbfile = database_output_file
 
@@ -298,7 +299,8 @@ def capture(interface,database_output_file,redraw_frequency,arp_resolve,
                 arp_resolve=arp_resolve,
                 columns=output_columns,
                 display_false=display_false,
-                force_sender=force_sender)
+                force_sender=force_sender,
+                stale_only=stale_only)
             print(ptable)
 
         # Cache packets that will be written to output file
@@ -337,7 +339,8 @@ def capture(interface,database_output_file,redraw_frequency,arp_resolve,
                     arp_resolve=arp_resolve,
                     columns=output_columns,
                     display_false=display_false,
-                    force_sender=force_sender)
+                    force_sender=force_sender,
+                    stale_only=stale_only)
 
                 print(f'Requests analyzed: {pcount}\n')
                 print(ptable)

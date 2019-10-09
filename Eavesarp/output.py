@@ -147,7 +147,7 @@ def build_snac(target,stale_ips,color_profile,display_false=True):
 def get_output_table(db_session,order_by=desc,sender_lists=None,
         target_lists=None,color_profile=None,dns_resolve=True,
         arp_resolve=False,columns=COL_ORDER,display_false=False,
-        force_sender=False):
+        force_sender=False,stale_only=False):
     '''Extract transaction records from the database and return
     them formatted as a table.
     '''
@@ -202,6 +202,9 @@ def get_output_table(db_session,order_by=desc,sender_lists=None,
     # Organize all the records by sender IP
     rowdict = {}
     for t in transactions:
+
+        if stale_only and not t.stale_target():
+            continue
 
         smac = t.sender.mac_address
 

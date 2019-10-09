@@ -60,5 +60,12 @@ ColorProfiles = {
             ),
     'rhino':ColorProfile(even_color=254, odd_color=244,
             header_color=254, header_bold=True,
-            stale_emoji=emojize(':rhinoceros:'))
+            stale_emoji=emojize(':rhinoceros:')),
+    'halloween':ColorProfile(even_color=166, odd_color=179,
+            header_color=166, header_bold=True,
+            snac_emojis=(
+                False,emojize(':jack-o-lantern:'),
+                ),
+            stale_emoji=emojize(':ghost:')
+            )
 }

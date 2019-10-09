@@ -85,6 +85,11 @@ output_columns = Argument('--output-columns','-oc',
     %(default)s. Valid Values: 
     '''+', '.join(list(COL_MAP.keys())))
 
+stale_only = Argument('--stale-only','-so',
+    action='store_true',
+    help='''Only display records with a stale target.
+    ''')
+
 # Reverse DNS Configuration
 dns_resolve = Argument('--dns-resolve','-dr',
     action='store_true',
