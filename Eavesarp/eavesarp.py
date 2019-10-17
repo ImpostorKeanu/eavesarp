@@ -108,7 +108,8 @@ def async_sniff(interface, redraw_frequency, sender_lists,
 def analyze(database_output_file, sender_lists=None, target_lists=None,
         analysis_output_file=None, pcap_files=[], sqlite_files=[],
         color_profile=None, dns_resolve=True, csv_output_file=None,
-        output_columns=None, stale_only=False, *args, **kwargs):
+        output_columns=None, stale_only=False, force_sender=False,
+        *args, **kwargs):
     '''Create a new database and populate it with records stored in
     each type of input file.
     '''
@@ -214,7 +215,8 @@ def analyze(database_output_file, sender_lists=None, target_lists=None,
         target_lists=target_lists,
         color_profile=color_profile,
         columns=output_columns,
-        stale_only=stale_only
+        stale_only=stale_only,
+        force_sender=force_sender
     ))
 
     if csv_output_file:

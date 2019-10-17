@@ -74,6 +74,7 @@ if __name__ == '__main__':
         default='eavesarp_dump.db',
         help='File to receive aggregated output')
     arguments.csv_output_file.add(aog)
+    arguments.force_sender.add(aog)
 
     # WHITELISTS
     awfg = aw_filter_group = analyze_parser.add_argument_group(
