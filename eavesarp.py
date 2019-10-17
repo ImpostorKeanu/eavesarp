@@ -14,6 +14,7 @@ from Eavesarp import arguments
 from Eavesarp.misc import get_interfaces
 from sys import exit,stdout
 
+
 # ====================================
 # BUSH LEAGUE: Make arguments reusable
 # ====================================
@@ -68,7 +69,7 @@ if __name__ == '__main__':
     aog = analyze_output_group = analyze_parser.add_argument_group(
         'Output Parameters'
     )
-
+    arguments.stale_only.add(aog)
     aog.add_argument('--database-output-file','-dbo',
         default='eavesarp_dump.db',
         help='File to receive aggregated output')
@@ -144,6 +145,8 @@ if __name__ == '__main__':
         of the table drawn to stdout during execution.
         '''
     )
+
+    arguments.stale_only.add(output_group)
     arguments.database_output_file.add(output_group)
 
     # PCAP output file
