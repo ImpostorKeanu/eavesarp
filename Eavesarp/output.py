@@ -91,8 +91,8 @@ def get_output_csv(db_session,order_by=desc,sender_lists=None,
     writer = csv.writer(outfile)
     writer.writerow(columns)
 
-    if 'snac' in columns: snacs = get_snacs(db_session)
-    else: snacs = []
+    #if 'snac' in columns: snacs = get_snacs(db_session)
+    #else: snacs = []
 
     # Write all transactions
     for t in transactions:
