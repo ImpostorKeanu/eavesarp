@@ -1,0 +1,26 @@
+# Tool name, which can differ from the repo name
+name: Eavesarp
+
+# Maintainer's name and email
+maintainer:
+  name: Justin Angel
+  email: justin@blackhillsinfosec.com
+
+# TTP tags with the format: <MITRE Tactic>/<Technique>
+# URL for reference: https://attack.mitre.org/tactics/enterprise/
+ttps:
+  - discovery/network_sniffing
+  - discovery/remote_system_discovery
+  - discovery/system_network_configuration_discovery
+  - discovery/system_network_connections_discovery
+  
+# Bulleted high level description. Please keep bullets brief.
+descriptions:
+  - ARP analysis tool.
+  - Identifies ARP relationships between nodes.
+  - Enumerates SNACs (Stale Network Address Configurations).
+  - Facilitates MITM attack techniques.
+  
+# Determines if the tool can be discussed publicly
+# Valid Values: true, false
+public: true
